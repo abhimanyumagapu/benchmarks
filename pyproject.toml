@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stead-bench"
+version = "0.1.0"
+description = "STEAD-Bench: a benchmark for functional RTL debug"
+requires-python = ">=3.13"
+dependencies = [
+    "pyyaml",
+    # Rust core of Surfer's wellen: reads VCD and FST directly. Same engine as walker.
+    "pywellen==0.25.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+stead = "stead.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stead*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "C901",
+    "SIM", "RET", "PTH", "ARG", "ERA", "T20", "G", "TID", "PIE", "PERF",
+    "PLR0912", "PLR0913", "PLR0915", "PLW",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+"stead/__main__.py" = ["T201"]   # the CLI prints its result
+
+[tool.ruff.format]
+docstring-code-format = true

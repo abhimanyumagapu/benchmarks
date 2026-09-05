@@ -1,0 +1,17 @@
+.venv/
+.conda/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# baked cases carry full source trees and waves; they are built, not committed
+cases/*/*/tree/
+cases/*/*/waves/
+cases/*/.*.baking/
+results/
+*.fst
+*.vcd
+*.log
+!tests/fixtures/**
