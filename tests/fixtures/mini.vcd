@@ -1,0 +1,19 @@
+$timescale 1ns $end
+$scope module TOP $end
+$scope module dut $end
+$var wire 32 ! rvfi_mem_wdata [31:0] $end
+$var wire 1 " valid $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+b00000000000000000000000000000000 !
+0"
+#100
+b11111111111111111111100000010000 !
+1"
+#108
+b11111111111111111111100000000000 !
+#200
+b00000000000000000000000001010101 !
+0"
