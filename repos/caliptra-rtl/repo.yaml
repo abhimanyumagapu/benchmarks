@@ -1,0 +1,6 @@
+url: https://github.com/chipsalliance/caliptra-rtl.git
+commit: 1f272de5be683cce9146614a1537bb0db45ec392
+validated_on: verilator-5.050
+dut_paths: [src/*/rtl/**]
+checker_paths: [src/integration/tb/**, src/integration/test_suites/**, src/integration/stimulus/**, tools/**]
+jobs: 1

@@ -1,0 +1,10 @@
+--- a/src/main/scala/rocket/ALU.scala
++++ b/src/main/scala/rocket/ALU.scala
+@@ -177,6 +177,6 @@
+   io.out := out
+   if (xLen > 32) {
+     require(xLen == 64)
+-    when (io.dw === DW_32) { io.out := Cat(Fill(32, out(31)), out(31,0)) }
++    when (io.dw === DW_32) { io.out := Cat(Fill(32, out(31)), out(31,0) ^ Mux(isSub(io.fn), 16.U(32.W), 0.U(32.W))) }
+   }
+ }

@@ -1,0 +1,117 @@
+diff --git a/build.sc b/build.sc
+index 1f5142996..147f489ed 100644
+--- a/build.sc
++++ b/build.sc
+@@ -191,7 +191,6 @@ trait Emulator extends Cross.Module2[String, String] {
+         generator.chirrtl().path,
+         s"--annotation-file=${generator.chiselAnno().path}",
+         "--disable-annotation-unknown",
+-        "-dedup",
+         "-O=debug",
+         "--split-verilog",
+         "--preserve-values=named",
+@@ -220,7 +219,6 @@ trait Emulator extends Cross.Module2[String, String] {
+         generator.chirrtl().path,
+         s"--annotation-file=${generator.chiselAnno().path}",
+         "--disable-annotation-unknown",
+-        "-dedup",
+         "-O=debug",
+         "--split-verilog",
+         "--preserve-values=named",
+@@ -280,7 +278,7 @@ trait Emulator extends Cross.Module2[String, String] {
+          |set(CMAKE_C_COMPILER "clang")
+          |set(CMAKE_CXX_COMPILER "clang++")
+          |set(CMAKE_CXX_FLAGS
+-         |"$${CMAKE_CXX_FLAGS} -DVERILATOR -DTEST_HARNESS=VTestHarness -include VTestHarness.h -include verilator.h -include ${generator.elaborate().path / config + ".plusArgs"}")
++         |"$${CMAKE_CXX_FLAGS} -std=c++17 -DVERILATOR -DTEST_HARNESS=VTestHarness -include VTestHarness.h -include verilator.h -include ${generator.elaborate().path / config + ".plusArgs"}")
+          |set(THREADS_PREFER_PTHREAD_FLAG ON)
+          |
+          |find_package(verilator)
+@@ -292,7 +290,7 @@ trait Emulator extends Cross.Module2[String, String] {
+          |
+          |target_link_libraries(emulator PRIVATE $${CMAKE_THREAD_LIBS_INIT})
+          |target_link_libraries(emulator PRIVATE fesvr)
+-         |verilate(emulator
++         |verilate(emulator TRACE_FST
+          |  SOURCES
+          |  ${mfccompiler.rtls().map(_.path.toString).mkString("\n")}
+          |  TOP_MODULE TestHarness
+diff --git a/src/main/resources/csrc/emulator.cc b/src/main/resources/csrc/emulator.cc
+index 236a11fb2..64e3cad7c 100644
+--- a/src/main/resources/csrc/emulator.cc
++++ b/src/main/resources/csrc/emulator.cc
+@@ -4,7 +4,7 @@
+ #include "verilated.h"
+ #if VM_TRACE
+ #include <memory>
+-#include "verilated_vcd_c.h"
++#include "verilated_fst_c.h"
+ #endif
+ #include <fesvr/dtm.h>
+ #include "remote_bitbang.h"
+@@ -116,7 +116,7 @@ int main(int argc, char** argv)
+   // Port numbers are 16 bit unsigned integers. 
+   uint16_t rbb_port = 0;
+ #if VM_TRACE
+-  FILE * vcdfile = NULL;
++  const char * vcdfile = NULL;
+   uint64_t start = 0;
+ #endif
+   char ** htif_argv = NULL;
+@@ -154,14 +154,7 @@ int main(int argc, char** argv)
+       case 'r': rbb_port = atoi(optarg);    break;
+       case 'V': verbose = true;             break;
+ #if VM_TRACE
+-      case 'v': {
+-        vcdfile = strcmp(optarg, "-") == 0 ? stdout : fopen(optarg, "w");
+-        if (!vcdfile) {
+-          std::cerr << "Unable to open " << optarg << " for VCD write\n";
+-          return 1;
+-        }
+-        break;
+-      }
++      case 'v': vcdfile = optarg;          break;  // STEAD: FST, not VCD
+       case 'x': start = atoll(optarg);      break;
+ #endif
+       // Process legacy '+' EMULATOR arguments by replacing them with
+@@ -258,11 +251,10 @@ done_processing:
+ 
+ #if VM_TRACE
+   Verilated::traceEverOn(true); // Verilator must compute traced signals
+-  std::unique_ptr<VerilatedVcdFILE> vcdfd(new VerilatedVcdFILE(vcdfile));
+-  std::unique_ptr<VerilatedVcdC> tfp(new VerilatedVcdC(vcdfd.get()));
++  std::unique_ptr<VerilatedFstC> tfp(new VerilatedFstC);
+   if (vcdfile) {
+     tile->trace(tfp.get(), 99);  // Trace 99 levels of hierarchy
+-    tfp->open("");
++    tfp->open(vcdfile);
+   }
+ #endif
+ 
+@@ -290,12 +282,13 @@ done_processing:
+     done_reset = !tile->reset;
+     tile->eval();
+ #if VM_TRACE
+-    bool dump = tfp && trace_count >= start;
++    bool dump = vcdfile && trace_count >= start;
+     if (dump)
+       tfp->dump(static_cast<vluint64_t>(trace_count * 2));
+ #endif
+ 
+     tile->clock = trace_count >= async_reset_cycles*2;
++    if (verbose) fprintf(stderr, "STEAD t=%lu\n", (unsigned long)trace_count);  // STEAD: clock count of the commit lines that follow (mcycle in the log pauses on stalls)
+     tile->eval();
+ #if VM_TRACE
+     if (dump)
+@@ -305,10 +298,8 @@ done_processing:
+   }
+ 
+ #if VM_TRACE
+-  if (tfp)
+-    tfp->close();
+   if (vcdfile)
+-    fclose(vcdfile);
++    tfp->close();
+ #endif
+ 
+   if (dtm->exit_code())

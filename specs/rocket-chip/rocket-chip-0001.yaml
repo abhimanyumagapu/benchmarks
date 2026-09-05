@@ -1,0 +1,4 @@
+id: rocket-chip-0001
+test: rv64i/SUBW
+bug_patch: rocket-chip-0001.patch
+gold: {file: src/main/scala/rocket/ALU.scala, start: 180, end: 180, class: stuck-bit}

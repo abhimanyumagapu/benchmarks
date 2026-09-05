@@ -1,0 +1,5 @@
+file: src/sha256/rtl/sha256.sv
+start: 397
+end: 397
+patch: bug.patch
+class: stuck-bit

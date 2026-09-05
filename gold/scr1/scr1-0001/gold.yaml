@@ -1,0 +1,5 @@
+file: src/core/pipeline/scr1_pipe_ialu.sv
+start: 571
+end: 571
+patch: bug.patch
+class: stuck-bit

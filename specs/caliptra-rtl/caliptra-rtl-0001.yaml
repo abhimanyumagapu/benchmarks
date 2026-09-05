@@ -1,0 +1,4 @@
+id: caliptra-rtl-0001
+test: smoke_test_sha256
+bug_patch: caliptra-rtl-0001.patch
+gold: {file: src/sha256/rtl/sha256.sv, start: 397, end: 397, class: stuck-bit}

@@ -1,0 +1,4 @@
+id: cva6-0001
+test: rv64ui-p-xor
+bug_patch: cva6-0001.patch
+gold: {file: core/alu.sv, start: 318, end: 318, class: stuck-bit}

@@ -1,0 +1,5 @@
+file: rtl/ibex_alu.sv
+start: 386
+end: 386
+patch: bug.patch
+class: stuck-bit

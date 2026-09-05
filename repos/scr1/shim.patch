@@ -1,0 +1,414 @@
+diff --git a/Makefile b/Makefile
+index afcb219..0305037 100644
+--- a/Makefile
++++ b/Makefile
+@@ -299,6 +299,7 @@ run_verilator_wf: $(test_info)
+ 	$(bld_dir)/verilator/V$(top_module) \
+ 	+test_info=$(test_info) \
+ 	+test_results=$(test_results) \
++	+dump_file=$(bld_dir)/simx.fst \
+ 	+imem_pattern=$(imem_pattern) \
+ 	+dmem_pattern=$(dmem_pattern) \
+ 	$(VERILATOR_OPTS) | tee -a $(sim_results)  ;\
+diff --git a/sim/Makefile b/sim/Makefile
+index 629d43d..4b3f4d4 100644
+--- a/sim/Makefile
++++ b/sim/Makefile
+@@ -120,10 +120,11 @@ build_verilator_wf: $(sv_list)
+ 	-D$(SIM_TRACE_DEF) \
+ 	-D$(SIM_CFG_DEF) \
+ 	-CFLAGS -DVCD_TRACE -CFLAGS -DTRACE_LVLV=20 \
+-	-CFLAGS -DVCD_FNAME=simx.vcd \
++	-CFLAGS -DVCD_FNAME=simx.fst \
++	$(if $(wildcard /opt/homebrew/include/lz4.h),-CFLAGS -I/opt/homebrew/include -LDFLAGS -L/opt/homebrew/lib,) \
+ 	--clk clk \
+ 	--exe $(scr1_wrapper) \
+-	--trace \
++	--trace-fst \
+ 	--trace-params \
+     --trace-structs \
+     --trace-underscore \
+diff --git a/sim/verilator_wrap/scr1_ahb_wrapper.c b/sim/verilator_wrap/scr1_ahb_wrapper.c
+index dd10043..420d415 100644
+--- a/sim/verilator_wrap/scr1_ahb_wrapper.c
++++ b/sim/verilator_wrap/scr1_ahb_wrapper.c
+@@ -1,56 +1,65 @@
+ 
+ #include <stdio.h>
++#include <string.h>
++#include <memory>
++#include <string>
+ #include <verilated.h>
+ #include "Vscr1_top_tb_ahb.h"
+ #ifdef VCD_TRACE
+-#include "verilated_vcd_c.h"
++#include "verilated_fst_c.h"
+ #endif // #ifdef VCD_TRACE
+ 
+ #define STRINGIFY(s) _STRINGIFY(s)
+ #define _STRINGIFY(s) #s
+ 
+-Vscr1_top_tb_ahb *top;
+-
+-vluint64_t main_time = 0;
++// Simulation time is owned by the VerilatedContext so that $time in the
++// testbench and the dump timestamps are the same number (STEAD fail line).
+ 
+ int main(int argc, char** argv) {
+-    Verilated::commandArgs(argc, argv);
++    const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
++    contextp->commandArgs(argc, argv);
+ 
+-    top = new Vscr1_top_tb_ahb;
++    const std::unique_ptr<Vscr1_top_tb_ahb> top{new Vscr1_top_tb_ahb{contextp.get()}};
+ 
+ #ifdef VCD_TRACE
+-    Verilated::traceEverOn(true);
+-    VerilatedVcdC* tfp = new VerilatedVcdC;
++    contextp->traceEverOn(true);
++    VerilatedFstC* tfp = new VerilatedFstC;
+ #ifdef TRACE_LVLV
+     top->trace(tfp, TRACE_LVLV);
+ #else
+     top->trace(tfp, 99);  // Trace 99 levels of hierarchy by default
+ #endif // #ifdef TRACE_LVLV
+ 
++    // Dump file (FST): +dump_file=<path> wins, then the compile-time default
+ #ifdef VCD_FNAME
+-    tfp->open(STRINGIFY(VCD_FNAME));
++    std::string vcd_name = STRINGIFY(VCD_FNAME);
+ #else
+-    tfp->open("./simx.vcd");
++    std::string vcd_name = "./simx.fst";
+ #endif // #ifdef VCD_FNAME
++    {
++        const std::string plus = contextp->commandArgsPlusMatch("dump_file=");
++        const size_t n = strlen("+dump_file=");
++        if (plus.size() > n) vcd_name = plus.substr(n);
++    }
++    tfp->open(vcd_name.c_str());
+ #endif // #ifdef VCD_TRACE
+ 
+-    while (!Verilated::gotFinish()) {
+-        if ((main_time % 10) == 1) {
++    while (!contextp->gotFinish()) {
++        if ((contextp->time() % 10) == 1) {
+             top->clk = 1;
+         }
+-        if ((main_time % 10) == 6) {
++        if ((contextp->time() % 10) == 6) {
+             top->clk = 0;
+         }
+         top->eval();
+-        main_time++;
+ #ifdef VCD_TRACE
+-        tfp->dump(main_time);
++        tfp->dump(contextp->time());  // same value the testbench saw as $time
+ #endif // #ifdef VCD_TRACE
++        contextp->timeInc(1);
+     }
+     top->final();
+ #ifdef VCD_TRACE
+     tfp->close();
+ #endif // #ifdef VCD_TRACE
+-    delete top;
++    return 0;
+ }
+-
+diff --git a/sim/verilator_wrap/scr1_axi_wrapper.c b/sim/verilator_wrap/scr1_axi_wrapper.c
+index fbb1c95..4e0e639 100644
+--- a/sim/verilator_wrap/scr1_axi_wrapper.c
++++ b/sim/verilator_wrap/scr1_axi_wrapper.c
+@@ -1,55 +1,65 @@
+ 
+ #include <stdio.h>
++#include <string.h>
++#include <memory>
++#include <string>
+ #include <verilated.h>
+ #include "Vscr1_top_tb_axi.h"
+ #ifdef VCD_TRACE
+-#include "verilated_vcd_c.h"
++#include "verilated_fst_c.h"
+ #endif // #ifdef VCD_TRACE
+ 
+ #define STRINGIFY(s) _STRINGIFY(s)
+ #define _STRINGIFY(s) #s
+ 
+-Vscr1_top_tb_axi *top;
+-
+-vluint64_t main_time = 0;
++// Simulation time is owned by the VerilatedContext so that $time in the
++// testbench and the dump timestamps are the same number (STEAD fail line).
+ 
+ int main(int argc, char** argv) {
+-    Verilated::commandArgs(argc, argv);
++    const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
++    contextp->commandArgs(argc, argv);
++
++    const std::unique_ptr<Vscr1_top_tb_axi> top{new Vscr1_top_tb_axi{contextp.get()}};
+ 
+-    top = new Vscr1_top_tb_axi;
+ #ifdef VCD_TRACE
+-    Verilated::traceEverOn(true);
+-    VerilatedVcdC* tfp = new VerilatedVcdC;
++    contextp->traceEverOn(true);
++    VerilatedFstC* tfp = new VerilatedFstC;
+ #ifdef TRACE_LVLV
+     top->trace(tfp, TRACE_LVLV);
+ #else
+     top->trace(tfp, 99);  // Trace 99 levels of hierarchy by default
+ #endif // #ifdef TRACE_LVLV
+ 
++    // Dump file (FST): +dump_file=<path> wins, then the compile-time default
+ #ifdef VCD_FNAME
+-    tfp->open(STRINGIFY(VCD_FNAME));
++    std::string vcd_name = STRINGIFY(VCD_FNAME);
+ #else
+-    tfp->open("./simx.vcd");
++    std::string vcd_name = "./simx.fst";
+ #endif // #ifdef VCD_FNAME
++    {
++        const std::string plus = contextp->commandArgsPlusMatch("dump_file=");
++        const size_t n = strlen("+dump_file=");
++        if (plus.size() > n) vcd_name = plus.substr(n);
++    }
++    tfp->open(vcd_name.c_str());
+ #endif // #ifdef VCD_TRACE
+ 
+-    while (!Verilated::gotFinish()) {
+-        if ((main_time % 10) == 1) {
++    while (!contextp->gotFinish()) {
++        if ((contextp->time() % 10) == 1) {
+             top->clk = 1;
+         }
+-        if ((main_time % 10) == 6) {
++        if ((contextp->time() % 10) == 6) {
+             top->clk = 0;
+         }
+         top->eval();
+-        main_time++;
+ #ifdef VCD_TRACE
+-        tfp->dump(main_time);
++        tfp->dump(contextp->time());  // same value the testbench saw as $time
+ #endif // #ifdef VCD_TRACE
++        contextp->timeInc(1);
+     }
+     top->final();
+ #ifdef VCD_TRACE
+     tfp->close();
+ #endif // #ifdef VCD_TRACE
+-    delete top;
++    return 0;
+ }
+-
+diff --git a/src/tb/scr1_memory_tb_ahb.sv b/src/tb/scr1_memory_tb_ahb.sv
+index 2c1398d..53af8fd 100644
+--- a/src/tb/scr1_memory_tb_ahb.sv
++++ b/src/tb/scr1_memory_tb_ahb.sv
+@@ -332,6 +332,32 @@ always_comb begin
+     endcase
+ end
+ 
++//-------------------------------------------------------------------------------
++// STEAD write tracker
++//-------------------------------------------------------------------------------
++// Per byte of memory, the last dmem write that landed there: bus time, the full
++// hwdata word and byte enables of that data phase. Sampled on the falling edge
++// of the accepted data phase, where hwdata is stable, so a dump opened at
++// stead_wr_time[] shows stead_wr_data[] on the port.
++localparam                      STEAD_TRACK_SIZE = 65536;
++time                            stead_wr_time [0:STEAD_TRACK_SIZE-1];
++logic [SCR1_AHB_WIDTH-1:0]      stead_wr_data [0:STEAD_TRACK_SIZE-1];
++logic [3:0]                     stead_wr_strb [0:STEAD_TRACK_SIZE-1];
++logic [SCR1_AHB_WIDTH-1:0]      stead_adr;
++
++always @(negedge clk) begin
++    if (rst_n & (dmem_ahb_state == SCR1_AHB_STATE_DATA) & dmem_req_ack & dmem_ahb_wr) begin
++        stead_adr = {dmem_ahb_addr[SCR1_AHB_WIDTH-1:2], 2'b00};
++        for (int i = 0; i < 4; ++i) begin
++            if (dmem_ahb_be[i] && ((stead_adr + i) < STEAD_TRACK_SIZE)) begin
++                stead_wr_time[stead_adr + i] = $time;
++                stead_wr_data[stead_adr + i] = dmem_hwdata;
++                stead_wr_strb[stead_adr + i] = dmem_ahb_be;
++            end
++        end
++    end
++end
++
+ //-------------------------------------------------------------------------------
+ // Data memory ready
+ //-------------------------------------------------------------------------------
+diff --git a/src/tb/scr1_memory_tb_axi.sv b/src/tb/scr1_memory_tb_axi.sv
+index e6d6fe1..e3071b7 100644
+--- a/src/tb/scr1_memory_tb_axi.sv
++++ b/src/tb/scr1_memory_tb_axi.sv
+@@ -86,6 +86,40 @@ string                                      test_file;
+ `endif // VERILATOR
+ bit                                         test_file_init;
+ 
++//-------------------------------------------------------------------------------
++// STEAD write tracker
++//-------------------------------------------------------------------------------
++// Per byte of memory, the last dmem write that landed there: bus time, the full
++// wdata word and strobes of that beat. Sampled on the falling edge, where the
++// beat the next rising edge accepts is stable, so a dump opened at
++// stead_wr_time[] shows stead_wr_data[] on the wdata port.
++localparam                                  STEAD_TRACK_SIZE = 65536;
++time                                        stead_wr_time [0:STEAD_TRACK_SIZE-1];
++logic  [W_DATA-1:0]                         stead_wr_data [0:STEAD_TRACK_SIZE-1];
++logic  [W_DATA/8-1:0]                       stead_wr_strb [0:STEAD_TRACK_SIZE-1];
++logic  [W_ADR-1:0]                          stead_adr;
++int                                         stead_lane;
++int                                         stead_nbytes;
++
++always @(negedge clk) begin
++    if (rst_n & wvalid[0] & wready[0] & wlast[0]) begin // interface 0 is dmem; imem never writes
++        // Same address/size/lane selection as mem_write()
++        stead_adr    = awready[0] ? awaddr[0] : awaddr_hold[0];
++        stead_nbytes = 2**(awready[0] ? awsize[0] : awsize_hold[0]);
++        stead_lane   = 0;
++        for (int i = 0; i < $clog2(W_DATA/8); ++i) stead_lane[i] = stead_adr[i];
++        for (int i = stead_lane; (i < W_DATA/8) && (stead_nbytes != 0); ++i) begin
++            if (wstrb[0][i] && (stead_adr < STEAD_TRACK_SIZE)) begin
++                stead_wr_time[stead_adr] = $time;
++                stead_wr_data[stead_adr] = wdata[0];
++                stead_wr_strb[stead_adr] = wstrb[0];
++            end
++            stead_adr    = stead_adr + 1'b1;
++            stead_nbytes = stead_nbytes - 1;
++        end
++    end
++end
++
+ //-------------------------------------------------------------------------------
+ // Local functions
+ //-------------------------------------------------------------------------------
+diff --git a/src/tb/scr1_top_tb_ahb.sv b/src/tb/scr1_top_tb_ahb.sv
+index fdeb234..cde5b13 100644
+--- a/src/tb/scr1_top_tb_ahb.sv
++++ b/src/tb/scr1_top_tb_ahb.sv
+@@ -277,6 +277,9 @@ end
+ // Run tests
+ //-------------------------------------------------------------------------------
+ 
++// STEAD: dumped DUT signal that carries signature writes (Verilator VCD naming)
++localparam string STEAD_SIG = "TOP.scr1_top_tb_ahb.i_top.dmem_hwdata";
++
+ `include "scr1_top_tb_runtests.sv"
+ //-------------------------------------------------------------------------------
+ // Core instance
+diff --git a/src/tb/scr1_top_tb_axi.sv b/src/tb/scr1_top_tb_axi.sv
+index 6282fec..6999625 100644
+--- a/src/tb/scr1_top_tb_axi.sv
++++ b/src/tb/scr1_top_tb_axi.sv
+@@ -342,6 +342,9 @@ end
+ // Run tests
+ //-------------------------------------------------------------------------------
+ 
++// STEAD: dumped DUT signal that carries signature writes (Verilator VCD naming)
++localparam string STEAD_SIG = "TOP.scr1_top_tb_axi.i_top.io_axi_dmem_wdata";
++
+ `include "scr1_top_tb_runtests.sv"
+ 
+ //------------------------------------------------------------------------------
+diff --git a/src/tb/scr1_top_tb_runtests.sv b/src/tb/scr1_top_tb_runtests.sv
+index aea666e..37d84bc 100644
+--- a/src/tb/scr1_top_tb_runtests.sv
++++ b/src/tb/scr1_top_tb_runtests.sv
+@@ -7,9 +7,34 @@
+ // Run tests
+ //-------------------------------------------------------------------------------
+ 
++// STEAD: fail record recovered from the memory write tracker (see hypo_scr1.md)
++string          s_vcd;
++time            stead_start;    // this test's start time; older tracker entries are stale
++bit             stead_found;
++time            stead_t;
++logic [31:0]    stead_e;
++logic [31:0]    stead_a;
++logic [31:0]    note_addr;
++logic [31:0]    note_e;
++logic [31:0]    note_a;
++
++`ifdef VERILATOR
++function string stead_name (logic [255:0] v);
++    stead_name = "";
++    for (int i = 31; i >= 0; --i) begin
++        if (v[i*8+:8] != 0) stead_name = {stead_name, $sformatf("%c", v[i*8+:8])};
++    end
++endfunction
++`else // VERILATOR
++function string stead_name (string v);
++    return v;
++endfunction
++`endif // VERILATOR
++
+ initial begin
+     $value$plusargs("imem_pattern=%h", imem_req_ack_stall);
+     $value$plusargs("dmem_pattern=%h", dmem_req_ack_stall);
++    $value$plusargs("dump_file=%s", s_vcd);
+ 
+ `ifdef SIGNATURE_OUT
+     $value$plusargs("test_name=%s", s_testname);
+@@ -121,6 +146,26 @@ always_ff @(posedge clk) begin
+                     while (!$feof(fd) && (start != stop)) begin
+                         if (($fscanf(fd, "%h", ref_data)=='h1)) begin
+                             test_data = {i_memory_tb.memory[start+3], i_memory_tb.memory[start+2], i_memory_tb.memory[start+1], i_memory_tb.memory[start]};
++                            if (ref_data != test_data) begin
++                                if (test_pass) begin
++                                    note_addr = start;
++                                    note_e    = ref_data;
++                                    note_a    = test_data;
++                                end
++                                // Candidate: the wrong byte whose last write is earliest in this test
++                                for (int i = 0; i < 4; ++i) begin
++                                    if ((ref_data[i*8+:8] != test_data[i*8+:8]) && (i_memory_tb.stead_wr_time[start+i] > stead_start) &&
++                                        (!stead_found || (i_memory_tb.stead_wr_time[start+i] < stead_t))) begin
++                                        stead_found = 1;
++                                        stead_t     = i_memory_tb.stead_wr_time[start+i];
++                                        stead_a     = i_memory_tb.stead_wr_data[start+i];
++                                        stead_e     = stead_a;
++                                        for (int j = 0; j < 4; ++j) begin
++                                            if (i_memory_tb.stead_wr_strb[start+i][j]) stead_e[j*8+:8] = ref_data[j*8+:8];
++                                        end
++                                    end
++                                end
++                            end
+                             test_pass &= (ref_data == test_data);
+                             start += 4;
+                         end else begin
+@@ -129,6 +174,14 @@ always_ff @(posedge clk) begin
+                         end
+                     end
+                     $fclose(fd);
++                    if (stead_found) begin
++                        $display("FAIL  test=%0s  signal=%0s  time=%0d  expected=0x%08h  actual=0x%08h  dump=%0s",
++                                 stead_name(test_file), STEAD_SIG, stead_t, stead_e, stead_a, s_vcd);
++                        $dumpflush;
++                    end else if (!test_pass) begin
++                        $display("NOTE  test=%0s  signature mismatch  addr=0x%08h  expected=0x%08h  actual=0x%08h",
++                                 stead_name(test_file), note_addr, note_e, note_a);
++                    end
+                     tests_total += 1;
+                     tests_passed += (test_pass & !test_error);
+                     watchdogs_cnt <= '0;
+@@ -141,6 +194,9 @@ always_ff @(posedge clk) begin
+             end else begin
+                 test_running <= 1'b0;
+                 test_pass = (i_top.i_core_top.i_pipe_top.i_pipe_mprf.mprf_int[10] == 0);
++                // Self-check tests carry no expected/actual: note only (gp = riscv-tests test number)
++                if (!test_pass) $display("NOTE  test=%0s  self-check fail  a0=0x%08h  gp=0x%08h", stead_name(test_file),
++                                         i_top.i_core_top.i_pipe_top.i_pipe_mprf.mprf_int[10], i_top.i_core_top.i_pipe_top.i_pipe_mprf.mprf_int[3]);
+                 tests_total     += 1;
+                 tests_passed    += (test_pass & !test_error);
+                 watchdogs_cnt    <= '0;
+@@ -181,6 +237,8 @@ always_ff @(posedge clk) begin
+                 `endif //SIGNATURE_OUT
+                 test_running <= 1'b1;
+                 rst_init <= 1'b1;
++                stead_start  = $time;
++                stead_found  = 0;
+                 `ifdef SIGNATURE_OUT
+                     b_single_run_flag = 0;
+                 `endif

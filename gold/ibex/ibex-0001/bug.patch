@@ -1,0 +1,11 @@
+--- a/rtl/ibex_alu.sv
++++ b/rtl/ibex_alu.sv
+@@ -383,7 +383,7 @@
+ 
+   assign bwlogic_or_result  = operand_a_i | bwlogic_operand_b;
+   assign bwlogic_and_result = operand_a_i & bwlogic_operand_b;
+-  assign bwlogic_xor_result = operand_a_i ^ bwlogic_operand_b;
++  assign bwlogic_xor_result = (operand_a_i ^ bwlogic_operand_b) ^ 32'h10;
+ 
+   assign bwlogic_or  = (operator_i == ALU_OR)  | (operator_i == ALU_ORN);
+   assign bwlogic_and = (operator_i == ALU_AND) | (operator_i == ALU_ANDN);

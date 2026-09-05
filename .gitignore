@@ -6,12 +6,16 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
-# baked cases carry full source trees and waves; they are built, not committed
-cases/*/*/tree/
+# baked cases carry waves; they are built, not committed. Trees live in the images.
 cases/*/*/waves/
 cases/*/.*.baking/
+cases/*/.score-*/
 results/
+dist/
 *.fst
 *.vcd
 *.log
 !tests/fixtures/**
+__pycache__/
+/*.md
+!/README.md

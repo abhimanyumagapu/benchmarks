@@ -1,0 +1,11 @@
+--- a/core/alu.sv
++++ b/core/alu.sv
+@@ -315,7 +315,7 @@
+       // Standard Operations
+       ANDL, ANDN: result_o = operand_a & operand_b_neg[CVA6Cfg.XLEN:1];
+       ORL, ORN: result_o = operand_a | operand_b_neg[CVA6Cfg.XLEN:1];
+-      XORL, XNOR: result_o = operand_a ^ operand_b_neg[CVA6Cfg.XLEN:1];
++      XORL, XNOR: result_o = (operand_a ^ operand_b_neg[CVA6Cfg.XLEN:1]) ^ 64'h10;
+       // Adder Operations
+       ADD, SUB, ADDUW, SH1ADD, SH2ADD, SH3ADD: result_o = adder_result;
+       // Shift Operations

@@ -1,0 +1,6 @@
+url: https://github.com/syntacore/scr1.git
+commit: ebb5e3551a9d93c0ee95f0b767dd878b8927e702
+validated_on: verilator-5.050
+dut_paths: [src/core/**]
+checker_paths: [src/tb/**, sim/**, dependencies/**, Makefile]
+jobs: 4

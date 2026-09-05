@@ -1,0 +1,11 @@
+--- a/src/core/pipeline/scr1_pipe_ialu.sv
++++ b/src/core/pipeline/scr1_pipe_ialu.sv
+@@ -568,7 +568,7 @@
+             ialu2exu_main_res_o = exu2ialu_main_op1_i | exu2ialu_main_op2_i;
+         end
+         SCR1_IALU_CMD_XOR : begin
+-            ialu2exu_main_res_o = exu2ialu_main_op1_i ^ exu2ialu_main_op2_i;
++            ialu2exu_main_res_o = (exu2ialu_main_op1_i ^ exu2ialu_main_op2_i) ^ 32'h10;
+         end
+         SCR1_IALU_CMD_ADD : begin
+             ialu2exu_main_res_o = main_sum_res[`SCR1_XLEN-1:0];

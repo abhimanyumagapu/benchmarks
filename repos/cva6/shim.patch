@@ -1,0 +1,71 @@
+diff --git a/corev_apu/tb/ariane_tb.cpp b/corev_apu/tb/ariane_tb.cpp
+index 3653eaa51..62f89b041 100644
+--- a/corev_apu/tb/ariane_tb.cpp
++++ b/corev_apu/tb/ariane_tb.cpp
+@@ -212,6 +212,10 @@ int main(int argc, char **argv) {
+           c = 'x';
+           optarg = optarg+12;
+         }
++        else if (arg.substr(0, 11) == "+dump_file=") {  // STEAD: same FST path for the wave and the testbench
++          c = 'f';
++          optarg = optarg+11;
++        }
+ #endif
+         else if (arg.substr(0, 12) == "+cycle-count")
+           c = 'c';
+diff --git a/corev_apu/tb/common/spike.sv b/corev_apu/tb/common/spike.sv
+index 1d1fb9ced..d1ecb3f6a 100644
+--- a/corev_apu/tb/common/spike.sv
++++ b/corev_apu/tb/common/spike.sv
+@@ -66,6 +66,29 @@ module spike #(
+ 
+     end
+ 
++
++    // STEAD: first rd-value mismatch of the tandem as one FAIL line (see Z/cva6/cva6.md).
++    // rvfi rd_wdata is wdata_commit_id registered once in cva6_rvfi and once more into
++    // s_core, so the DUT signal held the wrong value two cycles before the compare.
++    // The dump is stamped 2*cycle (clk low) / 2*cycle+1 (clk high) by ariane_tb.cpp.
++    localparam string STEAD_SIG = "TOP.ariane_testharness.i_ariane.i_cva6.wdata_commit_id";
++    string stead_dump = "";
++    string stead_test = "";
++    bit    stead_done;
++    logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] stead_wdata_q1, stead_wdata_q2, stead_e;
++
++    initial begin
++        void'($value$plusargs("dump_file=%s", stead_dump));
++        void'($value$plusargs("elf_file=%s", stead_test));
++        for (int k = stead_test.len() - 1; k >= 0; --k)
++            if (stead_test.getc(k) == "/") begin stead_test = stead_test.substr(k + 1, stead_test.len() - 1); break; end
++    end
++
++    always_ff @(posedge clk_i) begin
++        stead_wdata_q1 <= ariane_testharness.i_ariane.i_cva6.wdata_commit_id;
++        stead_wdata_q2 <= stead_wdata_q1;
++    end
++
+     // There is a need of delayed rvfi as the 'csr'_q signal does not have the
+     // written value
+     logic [63:0] pc64;
+@@ -154,6 +177,21 @@ module spike #(
+                     rvfi_spike_step(core, reference_model);
+                     rvfi_compare(core, reference_model);
+ 
++                    if (!stead_done && !(core.trap[0] | reference_model.trap[0]) && core.insn == reference_model.insn &&
++                        core.rd1_addr[4:0] == reference_model.rd1_addr[4:0] && core.rd1_addr[4:0] != 0 &&
++                        core.rd1_wdata !== reference_model.rd1_wdata) begin
++                        stead_done = 1;
++                        if (stead_wdata_q2[i] == core.rd1_wdata[CVA6Cfg.XLEN-1:0]) begin
++                            stead_e    = stead_wdata_q2;
++                            stead_e[i] = reference_model.rd1_wdata[CVA6Cfg.XLEN-1:0];
++                            $display("FAIL  test=%0s  signal=%0s  time=%0d  expected=0x%032h  actual=0x%032h  dump=%0s",
++                                     stead_test, STEAD_SIG, 2 * ($time - 2), stead_e, stead_wdata_q2, stead_dump);
++                        end else begin
++                            $display("NOTE  test=%0s  rd mismatch not on %0s  expected=0x%016h  actual=0x%016h",
++                                     stead_test, STEAD_SIG, reference_model.rd1_wdata, core.rd1_wdata);
++                        end
++                    end
++
+                     end_of_test_o = reference_model.halt;
+                     sim_finished = reference_model.halt[0];
+                 end

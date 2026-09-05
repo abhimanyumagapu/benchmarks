@@ -22,11 +22,12 @@ class Case:
     repo: str
     url: str
     commit: str
-    kind: str  # injected | hwe
+    image: str  # stead-<repo>:<commit>
+    image_digest: str  # the image id the case was baked from; same id, same tree
     test: str
-    recipe: str
     dump: str | None  # path relative to case dir, or None
     validated_on: str  # e.g. verilator-5.050
+    also_fails: list[str] = field(default_factory=list)
     dut_paths: list[str] = field(default_factory=list)
     checker_paths: list[str] = field(default_factory=list)
     stead: Stead | None = None

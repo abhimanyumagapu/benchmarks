@@ -1,13 +1,15 @@
-"""How a repo is built and run, behind one contract.
+"""How a core is built and run, behind one contract.
 
-A recipe is a `run.sh` next to the repo's shims (repos/<repo>/run.sh):
+A recipe is `repos/<repo>/run.sh`, executed inside the core's container against /work/tree:
 
-    run.sh build <tree>                                        0 ok | 2 build error
-    run.sh run   <tree> <test> <out_dir> [--dump=on|off]
-        0 PASS | 1 FAIL | 2 build error | 3 crash/hang/timeout
+    run.sh build <tree>                                   0 ok | 2 build error
+    run.sh run   <tree> <test> <out_dir> [--dump=on|off]  0 PASS | 1 FAIL | 2 build error | 3 crash
+    run.sh suite <tree> <out_dir> [<regex>]               0 ran | 2 build error
 
-`run` writes <out_dir>/sim.log (with the STEAD FAIL line on a value-check
-fail) and, with dump on, <out_dir>/dump.<fst|vcd>.
+`run` writes <out_dir>/sim.log (with the STEAD FAIL line on a value-check fail) and, with dump
+on, <out_dir>/dump.<fst|vcd>. `suite` runs every test (matching <regex>) with the dump off and
+writes <out_dir>/summary.txt, "<exit> <test>" per test, plus <out_dir>/<test>/sim.log for each
+test that did not pass.
 """
 
 from __future__ import annotations
@@ -17,7 +19,12 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from . import container
 from .fail import Stead, parse_log
+
+RUN_SH = "/work/recipe/run.sh"
+TREE = "/work/tree"
+TEST_TIMEOUT = 1200  # s per test, for `run` here and for each test of `suite` inside the container
 
 
 class RunStatus(Enum):
@@ -39,43 +46,58 @@ class RunResult:
     stead: Stead | None
 
 
-class ScriptRecipe:
-    def __init__(self, name: str, script: Path | str):
-        self.name = name
-        self.script = Path(script).resolve()
+def _status(code: int) -> RunStatus:
+    try:
+        return RunStatus(code)
+    except ValueError:
+        return RunStatus.CRASH
 
-    def _sh(self, *args: str, timeout: int | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [str(self.script), *args],
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
 
-    def build(self, tree: Path) -> None:
-        p = self._sh("build", str(tree))
-        if p.returncode != 0:
-            raise BuildError(f"{self.script} build {tree} -> exit {p.returncode}\n{p.stdout}\n{p.stderr}")
+def apply_patch(cid: str, patch: str, reverse: bool = False) -> None:
+    """`git apply` the diff at the tree root (no .git needed). Raises CalledProcessError."""
+    container.put(cid, patch, "/work/patch.diff")
+    p = container.run(cid, "git", "apply", *(["-R"] if reverse else []), "/work/patch.diff", cwd=TREE)
+    container.run(cid, "rm", "-f", "/work/patch.diff")
+    if p.returncode != 0:
+        raise BuildError(f"patch does not apply: {p.stderr}")
 
-    def run(self, tree: Path, test: str, out_dir: Path, dump: bool = True, timeout: int = 1200) -> RunResult:
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            p = self._sh(
-                "run", str(tree), test, str(out_dir), f"--dump={'on' if dump else 'off'}", timeout=timeout
-            )
-            code = p.returncode
-            stderr = p.stderr
-        except subprocess.TimeoutExpired as e:
-            code, stderr = 3, f"harness timeout after {timeout}s\n{e.stderr or ''}"
-        log = out_dir / "sim.log"
-        if not log.exists():
-            log.write_text(f"(no sim.log written by recipe; exit {code})\n{stderr}")
-        try:
-            status = RunStatus(code)
-        except ValueError:
-            status = RunStatus.CRASH
-        dumps = sorted(out_dir.glob("dump.*"))
-        stead = parse_log(log) if status is RunStatus.FAIL else None
-        return RunResult(status=status, log=log, dump=dumps[0] if dumps else None, stead=stead)
+
+def build(cid: str) -> None:
+    p = container.run(cid, RUN_SH, "build", TREE)
+    if p.returncode != 0:
+        raise BuildError(f"run.sh build -> exit {p.returncode}\n{p.stdout}\n{p.stderr}")
+
+
+def run(cid: str, test: str, out_dir: Path, dump: bool = True) -> RunResult:
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log = out_dir / "sim.log"
+    inside = f"/out/{out_dir.name}"
+    argv = (RUN_SH, "run", TREE, test, inside, f"--dump={'on' if dump else 'off'}")
+    try:
+        p = container.run(cid, *argv, timeout=TEST_TIMEOUT)
+    except subprocess.TimeoutExpired:  # the container was killed; nothing is left to copy
+        log.write_text(f"harness timeout after {TEST_TIMEOUT}s\n")
+        return RunResult(RunStatus.CRASH, log, None, None)
+    container.get(cid, inside, out_dir)
+    if not log.exists():
+        log.write_text(f"(no sim.log written by recipe; exit {p.returncode})\n{p.stderr}")
+    status = _status(p.returncode)
+    dumps = sorted(out_dir.glob("dump.*"))
+    stead = parse_log(log) if status is RunStatus.FAIL else None
+    return RunResult(status=status, log=log, dump=dumps[0] if dumps else None, stead=stead)
+
+
+def suite(cid: str, out_dir: Path, regex: str = "") -> list[tuple[RunStatus, str]]:
+    """Every test's status, in suite order; failing tests have their sim.log under out_dir/<test>/.
+    No cap here: stead_suite caps each test at TEST_TIMEOUT."""
+    argv = (RUN_SH, "suite", TREE, "/out/suite", *([regex] if regex else []))
+    p = container.run(cid, *argv, env={"STEAD_TEST_TIMEOUT": str(TEST_TIMEOUT)})
+    if p.returncode != 0:
+        raise BuildError(f"run.sh suite -> exit {p.returncode}\n{p.stdout}\n{p.stderr}")
+    container.get(cid, "/out/suite", out_dir)
+    rows = []
+    for line in (Path(out_dir) / "summary.txt").read_text().splitlines():
+        code, test = line.split(maxsplit=1)
+        rows.append((_status(int(code)), test))
+    return rows

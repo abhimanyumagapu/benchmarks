@@ -1,7 +1,11 @@
 #!/bin/bash
-# Fake `claude -p --output-format json`: records its argv and cwd, answers with a canned submission.
+# Fake `claude`: answers --version; otherwise records argv and cwd, fixes the bug in the
+# writable tree copy it was given, and answers in stream-json: one assistant event, one result.
+[ "$1" = "--version" ] && { echo "claude 9.9.9 (fake)"; exit 0; }
 printf '%s\n' "$PWD" "$@" > "${FAKECLAUDE_LOG:-/dev/null}"
+sed -i.bak "s/(a ^ b) ^ 32'h10; \/\/ BUG/a ^ b;/" tree/rtl/alu.sv && rm -f tree/rtl/alu.sv.bak
+echo "module helper; endmodule" > tree/rtl/new.sv   # a file the agent created must be in the patch too
 cat <<'JSON'
-{"type":"result","is_error":false,"num_turns":4,"duration_ms":30000,"total_cost_usd":0.5,
- "result":"The XOR result has bit 4 flipped.\n\n```json\n{\"k\": 2, \"lines\": [{\"file\": \"rtl/alu.sv\", \"line\": 2, \"confidence\": 0.9}, {\"file\": \"rtl/alu.sv\", \"line\": 1, \"confidence\": 0.1}], \"patch\": null, \"text\": \"bit 4 of the XOR result is flipped\"}\n```"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the log."}]}}
+{"type":"result","is_error":false,"num_turns":4,"duration_ms":30000,"total_cost_usd":0.5,"result":"The XOR result has bit 4 flipped.\n\n```json\n{\"k\": 2, \"lines\": [{\"file\": \"rtl/alu.sv\", \"line\": 2, \"confidence\": 0.9}, {\"file\": \"rtl/alu.sv\", \"line\": 1, \"confidence\": 0.1}], \"text\": \"bit 4 of the XOR result is flipped\"}\n```"}
 JSON

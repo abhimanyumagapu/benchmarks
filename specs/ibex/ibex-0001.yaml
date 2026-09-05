@@ -1,0 +1,4 @@
+id: ibex-0001
+test: rv32i/I-XOR-01
+bug_patch: ibex-0001.patch
+gold: {file: rtl/ibex_alu.sv, start: 386, end: 386, class: stuck-bit}

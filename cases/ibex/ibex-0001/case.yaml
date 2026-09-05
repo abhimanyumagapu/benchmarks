@@ -1,0 +1,26 @@
+id: ibex-0001
+repo: ibex
+url: https://github.com/lowRISC/ibex.git
+commit: 34b0705760ef3dfa00e99637432473d2be8f22f3
+image: stead-ibex:34b0705
+image_digest: sha256:2d02bcda7321b13ff22f212ced0cf03d17370b82bb47b398de810b7482d72523
+test: rv32i/I-XOR-01
+dump: waves/fail.fst
+validated_on: verilator-5.050
+also_fails: []
+dut_paths:
+- rtl/**
+checker_paths:
+- dv/**
+- examples/**
+- shared/**
+- vendor/**
+- util/**
+stead:
+  test: I-XOR-01
+  signal: TOP.ibex_riscv_compliance.u_top.u_ibex_top.rvfi_mem_wdata
+  time: 126
+  expected: '0x00000000'
+  actual: '0x00000010'
+  dump: waves/fail.fst
+notes: ''

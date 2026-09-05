@@ -35,7 +35,10 @@ commit. Find the RTL line that caused it.
 - Say DUT or TB for every claim. The checker is right by construction here; do not rewrite it.
 - Show evidence: a signal name, a time, a value, a file:line. No evidence, no claim.
 - Prefer the smallest cause. A one-line RTL edit that explains the whole fail beats a theory.
-- Do not modify anything under this folder. If you propose a patch, put it in the answer.
+- No network. Do not search the web, fetch anything, or look up the repo's history. The folder is
+  all the evidence there is.
+- Fix it in place: edit the file under `tree/` when you are confident. Your edits to `tree/` are
+  taken as the patch. Never edit anything outside `tree/`, and nothing under the checker paths.
 
 ## Answer
 
@@ -44,9 +47,8 @@ Finish with one JSON object in a ```json block, and nothing after it:
 ```json
 {"k": 3,
  "lines": [{"file": "rtl/<file>.sv", "line": 123, "confidence": 0.7}],
- "patch": "<unified diff against tree/, paths relative to tree/, or null>",
  "text": "<one paragraph: what is wrong and why>"}
 ```
 
-`lines` is best first, at most `k`. Paths are relative to `tree/`. The patch may touch
-`dut_paths` only.
+`lines` is best first, at most `k`. Paths are relative to `tree/`. The patch is whatever you
+changed under `tree/`; it may touch `dut_paths` only.

@@ -1,0 +1,6 @@
+url: https://github.com/lowRISC/ibex.git
+commit: 34b0705760ef3dfa00e99637432473d2be8f22f3
+validated_on: verilator-5.050
+dut_paths: [rtl/**]
+checker_paths: [dv/**, examples/**, shared/**, vendor/**, util/**]
+jobs: 4

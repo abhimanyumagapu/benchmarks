@@ -1,0 +1,25 @@
+id: caliptra-rtl-0001
+repo: caliptra-rtl
+url: https://github.com/chipsalliance/caliptra-rtl.git
+commit: 1f272de5be683cce9146614a1537bb0db45ec392
+image: stead-caliptra-rtl:1f272de
+image_digest: sha256:c3628cd125760738286ccd572f67d26e8828f1be8c2ed2131d70cfd46e870c4a
+test: smoke_test_sha256
+dump: waves/fail.fst
+validated_on: verilator-5.050
+also_fails: []
+dut_paths:
+- src/*/rtl/**
+checker_paths:
+- src/integration/tb/**
+- src/integration/test_suites/**
+- src/integration/stimulus/**
+- tools/**
+stead:
+  test: smoke_test_sha256
+  signal: TOP.caliptra_top_tb.caliptra_top_dut.initiator_inst.hrdata
+  time: 6181450
+  expected: '0xba7816bf'
+  actual: '0xba7816af'
+  dump: waves/fail.fst
+notes: ''

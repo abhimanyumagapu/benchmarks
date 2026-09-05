@@ -1,0 +1,4 @@
+id: scr1-0001
+test: arch_xor-01.hex
+bug_patch: scr1-0001.patch
+gold: {file: src/core/pipeline/scr1_pipe_ialu.sv, start: 571, end: 571, class: stuck-bit}

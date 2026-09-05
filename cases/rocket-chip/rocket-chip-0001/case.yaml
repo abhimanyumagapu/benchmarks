@@ -1,0 +1,24 @@
+id: rocket-chip-0001
+repo: rocket-chip
+url: https://github.com/chipsalliance/rocket-chip.git
+commit: 55bcad0f59436de98ea510334121de8546b9e9d7
+image: stead-rocket-chip:55bcad0
+image_digest: sha256:bc627c26b51c272b90bb461012441ddc4913f3d03ac65e32ba6534e28125e5a1
+test: rv64i/SUBW
+dump: waves/fail.fst
+validated_on: verilator-5.050
+also_fails: []
+dut_paths:
+- src/main/scala/**
+checker_paths:
+- src/main/resources/**
+- build.sc
+- dependencies/**
+stead:
+  test: SUBW
+  signal: TOP.TestHarness.ldut.tile_prci_domain.element_reset_domain_rockettile.core.io_dmem_s1_data_data
+  time: 207335
+  expected: '0x00000000'
+  actual: '0x1000000010'
+  dump: waves/fail.fst
+notes: ''
