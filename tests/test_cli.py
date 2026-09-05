@@ -1,10 +1,16 @@
+"""The whole loop runs from the command line: bake, score, table, ship; bake --all keeps going."""
+
 import json
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 import yaml
 
+from stead.__main__ import bake_all
+from stead.ship import ship
+from stead.table import table
 from tests.conftest import FIX
 
 ENV = {
@@ -14,38 +20,36 @@ ENV = {
 
 
 def stead(*args, cwd):
-    cmd = [sys.executable, "-m", "stead", *args]
-    return subprocess.run(cmd, text=True, capture_output=True, cwd=str(cwd), env=ENV, check=False)
+    return subprocess.run(
+        [sys.executable, "-m", "stead", *args], text=True, capture_output=True, cwd=cwd, env=ENV, check=False
+    )
 
 
-def write_spec(tmp_path, src_repo, bug_patch):
-    (tmp_path / "bug.patch").write_text(bug_patch)
-    spec = {
-        "id": "fake-0001",
-        "repo": "fake",
-        "url": str(src_repo),
-        "commit": "HEAD",
-        "test": "xor_test",
-        "bug_patch": "bug.patch",
-        "gold": {"file": "rtl/alu.sv", "start": 2, "end": 2, "class": "logic"},
-        "dut_paths": ["rtl/**"],
-        "checker_paths": ["dv/**"],
-        "validated_on": "fake-sim",
-    }
-    p = tmp_path / "fake-0001.yaml"
-    p.write_text(yaml.safe_dump(spec))
-    return p
+def write_spec(specs, src_repo, bug_patch, sid, test):
+    (specs / f"{sid}.patch").write_text(bug_patch)
+    (specs / f"{sid}.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": sid,
+                "repo": "fake",
+                "url": str(src_repo),
+                "commit": "HEAD",
+                "test": test,
+                "bug_patch": f"{sid}.patch",
+                "gold": {"file": "rtl/alu.sv", "start": 2, "end": 2, "class": "logic"},
+                "dut_paths": ["rtl/**"],
+                "checker_paths": ["dv/**"],
+                "validated_on": "fake-sim",
+            }
+        )
+    )
 
 
-def test_bake_then_score_end_to_end(src_repo, bug_patch, tmp_path):
+def test_bake_score_table_from_the_command_line(src_repo, bug_patch, tmp_path):
     (tmp_path / "repos" / "fake").mkdir(parents=True)
     (tmp_path / "repos" / "fake" / "run.sh").symlink_to(FIX / "fakerepo" / "run.sh")
-    spec = write_spec(tmp_path, src_repo, bug_patch)
-    r = stead("bake", str(spec), cwd=tmp_path)
-    assert r.returncode == 0, r.stderr
-    case_dir = tmp_path / "cases" / "fake" / "fake-0001"
-    assert (case_dir / "case.yaml").exists()
-
+    write_spec(tmp_path, src_repo, bug_patch, "fake-0001", "xor_test")
+    assert stead("bake", "fake-0001.yaml", cwd=tmp_path).returncode == 0
     sub = tmp_path / "claude.json"
     sub.write_text(
         json.dumps(
@@ -54,32 +58,33 @@ def test_bake_then_score_end_to_end(src_repo, bug_patch, tmp_path):
                 "case": "fake-0001",
                 "k": 1,
                 "lines": [{"file": "rtl/alu.sv", "line": 2}],
-                "cost": {"usd": 1},
+                "cost": {"usd": 1, "wall_s": 60},
             }
         )
     )
-    r = stead("score", str(sub), cwd=tmp_path)
-    assert r.returncode == 0, r.stderr
-    out = json.loads(r.stdout)
-    assert out["hit@1"] is True and out["case"] == "fake-0001"
-    assert (tmp_path / "results" / "fake-0001" / "claude.json").exists()
+    assert json.loads(stead("score", str(sub), cwd=tmp_path).stdout)["hit@1"] is True
+    assert "| claude | 1 | 1/1 | 1/1 | 0/1 | 1.00 | 60 |" in table(tmp_path / "results")
 
 
-def test_validate_reports_ok_for_good_log(tmp_path):
-    log = tmp_path / "fail.log"
-    log.write_text(
-        f"FAIL  test=t  signal=TOP.dut.rvfi_mem_wdata  time=100  expected=0xfffff800  "
-        f"actual=0xfffff810  dump={FIX / 'mini.vcd'}\n"
+def test_bake_all_skips_existing_and_reports_failures(src_repo, bug_patch, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "repos" / "fake").mkdir(parents=True)
+    (tmp_path / "repos" / "fake" / "run.sh").symlink_to(FIX / "fakerepo" / "run.sh")
+    specs = tmp_path / "specs" / "fake"
+    specs.mkdir(parents=True)
+    write_spec(specs, src_repo, bug_patch, "fake-0001", "xor_test")
+    write_spec(specs, src_repo, bug_patch, "fake-0002", "add_test")  # passes on the buggy tree
+    assert bake_all(tmp_path / "specs") == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith("fake-0001  baked") and out[1].startswith(
+        "fake-0002  FAILED  buggy tree must FAIL"
     )
-    r = stead("validate", str(log), cwd=tmp_path)
-    assert r.returncode == 0 and "OK" in r.stdout
+    assert bake_all(tmp_path / "specs") == 1
+    assert capsys.readouterr().out.splitlines()[0].startswith("fake-0001  exists")
 
 
-def test_validate_reports_bad_for_wrong_actual(tmp_path):
-    log = tmp_path / "fail.log"
-    log.write_text(
-        f"FAIL  test=t  signal=TOP.dut.rvfi_mem_wdata  time=100  expected=0xfffff800  "
-        f"actual=0x1  dump={FIX / 'mini.vcd'}\n"
-    )
-    r = stead("validate", str(log), cwd=tmp_path)
-    assert r.returncode == 1 and "BAD" in r.stdout
+def test_ship_tars_the_case_folder(baked_case, tmp_path):
+    with tarfile.open(ship(baked_case, tmp_path / "out")) as t:
+        names = t.getnames()
+    assert "fake-0001/case.yaml" in names and "fake-0001/tree/rtl/alu.sv" in names
+    assert not any("gold" in n for n in names)

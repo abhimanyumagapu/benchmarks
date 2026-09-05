@@ -42,6 +42,7 @@ class BakeSpec:
     out_root: Path
     gold_root: Path
     kind: str = "injected"
+    shim_patch: str = ""  # TB-side edits (write-tracker, FAIL line); checker_paths only
 
 
 def _git(*args: str, cwd: Path | None = None) -> str:
@@ -119,6 +120,9 @@ def bake(spec: BakeSpec, recipe: ScriptRecipe) -> Path:
     bad = [f for f in patchlib.touched_files(spec.bug_patch) if not matches_any(f, spec.dut_paths)]
     if bad:
         raise BakeError(f"bug patch touches files outside dut_paths: {bad}")
+    bad = [f for f in patchlib.touched_files(spec.shim_patch) if matches_any(f, spec.dut_paths)]
+    if bad:
+        raise BakeError(f"shim patch touches dut_paths: {bad}")
 
     work = case_dir.parent / f".{spec.id}.baking"
     shutil.rmtree(work, ignore_errors=True)
@@ -128,6 +132,9 @@ def bake(spec: BakeSpec, recipe: ScriptRecipe) -> Path:
     try:
         logger.info("%s: clone %s @ %s", spec.id, spec.url, spec.commit)
         sha = _checkout(spec.url, spec.commit, tree)
+        if spec.shim_patch:
+            logger.info("apply shim patch")
+            patchlib.apply(tree, spec.shim_patch)
 
         clean = _build_and_run(recipe, tree, spec.test, work / "run_pass", "clean")
         _expect(clean, RunStatus.PASS, "clean")

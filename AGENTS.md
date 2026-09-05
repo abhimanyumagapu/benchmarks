@@ -18,8 +18,10 @@ Per-repo runners: `repos/<repo>/run.sh` (contract in `stead/recipe.py`).
 ## Tests
 
 - Test first: watch it fail, then write the code.
+- Test properties, not files: one test per rule the bench must keep (clean must PASS, gold never
+  ships, crash is never FAIL). No test for a getter, a round-trip, or a one-line helper.
 - No mocks. Tests run the real code against `tests/fixtures/fakerepo/run.sh` (the `run.sh`
-  contract) and a tiny VCD. Every module has a test file.
+  contract) and a tiny VCD. Four test files; add a test to one of them, not a fifth file.
 
 ## Before finishing any Python change
 

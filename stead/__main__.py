@@ -1,4 +1,7 @@
-"""stead bake <spec.yaml> | solve <case_dir> [method] | score <submission.json> | validate <sim.log> | table
+"""stead <command> <args>
+
+    bake <spec.yaml> | bake --all <specs_dir> | ship <case_dir>
+    solve <case_dir> [method] | score <submission.json> | table | validate <sim.log>
 
 Run from the bench root: repos/<repo>/run.sh, cases/, gold/, results/.
 """
@@ -7,16 +10,18 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 
-from .bake import BakeSpec, bake
+from .bake import BakeError, BakeSpec, bake
 from .fail import parse_fail_line
 from .gold import Gold
 from .recipe import ScriptRecipe
 from .score import Submission, score_submission
+from .ship import ship
 from .solve import solve
 from .table import table
 from .validate import validate_stead
@@ -26,17 +31,47 @@ def _recipe(repo: str) -> ScriptRecipe:
     return ScriptRecipe(repo, Path("repos") / repo / "run.sh")
 
 
-def cmd_bake(spec_path: str) -> int:
-    d = yaml.safe_load(Path(spec_path).read_text())
+def load_spec(spec_path: Path) -> BakeSpec:
+    d = yaml.safe_load(spec_path.read_text())
     g = d.pop("gold")
-    spec = BakeSpec(
+    shim = Path("repos") / d["repo"] / "shim.patch"
+    return BakeSpec(
         gold=Gold(file=g["file"], start=g["start"], end=g["end"], klass=g.get("class", "")),
-        bug_patch=(Path(spec_path).parent / d.pop("bug_patch")).read_text(),
+        bug_patch=(spec_path.parent / d.pop("bug_patch")).read_text(),
+        shim_patch=shim.read_text() if shim.exists() else "",
         out_root=Path("cases"),
         gold_root=Path("gold"),
         **d,
     )
+
+
+def bake_all(specs_dir: Path) -> int:
+    """Bake every spec without a case yet; one verdict line each. Returns the number of failures."""
+    failed = 0
+    for spec_path in sorted(specs_dir.glob("*/*.yaml")):
+        spec = load_spec(spec_path)
+        if (spec.out_root / spec.repo / spec.id).exists():
+            print(f"{spec.id}  exists")
+            continue
+        try:
+            bake(spec, _recipe(spec.repo))
+            print(f"{spec.id}  baked")
+        except (BakeError, subprocess.CalledProcessError) as e:
+            failed += 1
+            print(f"{spec.id}  FAILED  {str(e).splitlines()[0]}")
+    return failed
+
+
+def cmd_bake(spec_path: str, specs_dir: str = "") -> int:
+    if spec_path == "--all":
+        return 1 if bake_all(Path(specs_dir)) else 0
+    spec = load_spec(Path(spec_path))
     print(bake(spec, _recipe(spec.repo)))
+    return 0
+
+
+def cmd_ship(case_dir: str) -> int:
+    print(ship(Path(case_dir), Path("dist")))
     return 0
 
 
@@ -80,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
     cmds = {
         "bake": cmd_bake,
+        "ship": cmd_ship,
         "solve": cmd_solve,
         "score": cmd_score,
         "validate": cmd_validate,
