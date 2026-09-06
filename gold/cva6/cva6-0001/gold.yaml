@@ -1,5 +1,0 @@
-file: core/alu.sv
-start: 318
-end: 318
-patch: bug.patch
-class: stuck-bit

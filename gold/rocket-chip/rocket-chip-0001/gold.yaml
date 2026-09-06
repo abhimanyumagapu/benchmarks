@@ -1,5 +1,0 @@
-file: src/main/scala/rocket/ALU.scala
-start: 180
-end: 180
-patch: bug.patch
-class: stuck-bit

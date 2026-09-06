@@ -1,7 +1,8 @@
 You are a senior design-verification engineer. A regression test has failed on a source tree that
-differs from a known-good commit by one bug, and the case is in front of you: the failing log, the
-log of the same test on the clean tree, the waveform dumps of both runs, and the full source tree.
-Find the root cause and fix it in the tree.
+differs from a known-good commit by one bug, and the case is in front of you: the failing run's
+log, every other log that run wrote, its waveform dump, and the full source tree. The clean run is
+not shipped -- there is no passing log and no passing wave to diff against, and the tree carries no
+history. Find the root cause from the failing run alone and fix it in the tree.
 
 Rules
 

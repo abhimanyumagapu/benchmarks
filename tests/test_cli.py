@@ -82,12 +82,26 @@ def test_bake_score_table_from_the_command_line(tmp_path):
     miss = scored.with_name("claude.t2.score.json")  # a second trial that missed
     miss.write_text(json.dumps({**json.loads(scored.read_text()), "trial": 2, "hit@1": False}))
     out = stead("table", cwd=tmp_path).stdout
-    # one case, two trials, hit in one of them: pass@k counts it once; nothing recorded about who ran when
-    assert "| claude | 100% | ? | default | 2 | ? | 1 | 1/1 | 1/1 | 0/1 | 0 | 0 | 2.00 | 2m00s |" in out
-    assert "| fake-0001 | 1 | fake | logic | 1 | 1 | no patch | 1.00 | 60 | 0 |  |" in out
-    assert "| fake-0001 | 2 | fake | logic | 1 | 1 | no patch | 1.00 | 60 | 0 |  |" in out
-    assert "| fake | 1 | 1/1 |" in out and "| logic | 1 | 1/1 |" in out
-    assert (tmp_path / "results" / "table.md").read_text() == out.rstrip("\n")  # the page on disk is the same
+    # one case, two trials, hit in one of them: pass@k counts it once
+    assert "claude" in out and "100%" in out and "1/1" in out
+    html = (tmp_path / "results" / "index.html").read_text()
+    assert html.startswith("<!doctype html>") and "</html>" in html
+    assert "<title>STEAD-Bench results</title>" in html
+    assert "cdn" not in html.lower() and "<script src" not in html  # self-contained: servable as it is
+    # the accent must actually be spent, not merely declared: a palette nobody can see is the bug
+    assert html.count("var(--blue)") >= 3
+    # The page's script has been broken three times by a Python escape reaching the browser: an
+    # octal \2191 that printed "91", and a \n that opened a string literal and never closed it. A
+    # stray newline inside a quoted string leaves that line with an odd number of quotes, and one
+    # bad line kills every behaviour on the page at once.
+    script = html[html.index("<script>") + 8 : html.index("</script>")]
+    assert not [ln for ln in script.splitlines() if ln.count("'") % 2], "broken string literal"
+    assert "\\2" not in html  # no raw escape sequences survived into the page
+    # 4 table headers, then a leaderboard row, two trial rows, one repo row and one class row
+    assert html.count("<tr>") == 4 + 1 + 2 + 1 + 1
+    assert ">fake-0001<" in html and ">fake<" in html and ">logic<" in html
+    assert "100%" in html and "1/1" in html
+    assert not (tmp_path / "results" / "table.md").exists()  # the page is html now
 
 
 def test_bake_all_skips_existing_and_reports_failures(tmp_path, monkeypatch, capsys):
@@ -98,12 +112,13 @@ def test_bake_all_skips_existing_and_reports_failures(tmp_path, monkeypatch, cap
     write_spec(specs, "fake-0002", "add_test")  # passes on the buggy tree
     write_spec(specs, "fake-0003", "xor_test", commit=BROKEN)  # another commit of the core: its own image
     assert bake_all(tmp_path / "specs") == 2
-    out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("fake-0001  baked")
-    assert out[1].startswith("fake-0002  FAILED  BakeError: buggy tree must FAIL")
-    assert out[2].startswith(
-        "fake-0003  FAILED  BakeError: clean tree must PASS"
-    )  # baked on stead-fake:1111111
+    out = capsys.readouterr().out
+    # a run prints its counter and its failures, nothing per success
+    assert "baking [####################]  3/3  2 failed" in out
+    assert "fake-0002  FAILED  BakeError: buggy tree must FAIL" in out
+    # fake-0003 is baked on stead-fake:1111111, its own commit's image
+    assert "fake-0003  FAILED  BakeError: clean tree must PASS" in out
+    assert "fake-0001" not in out.replace("fake-0001  exists", "")  # the one that worked stayed quiet
     assert bake_all(tmp_path / "specs") == 2  # the baked one is skipped, the two failures retried
     assert capsys.readouterr().out.splitlines()[0].startswith("fake-0001  exists")
 

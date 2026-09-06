@@ -18,4 +18,8 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: docker version
+      # GitHub's runners forbid unprivileged user namespaces, so the agent sandbox degrades to a
+      # passthrough here. That is the case this asserts: the probe must say so rather than hand
+      # the agent a wrapper that fails and swallows every command it runs.
+      - run: uv run python -c "from stead.agents import sandbox_kind; print(sandbox_kind())"
       - run: uv run python -m pytest -q

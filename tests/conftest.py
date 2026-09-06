@@ -1,9 +1,52 @@
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 FIX = Path(__file__).parent / "fixtures"
+
+
+def _docker_only_bin() -> str:
+    """A directory holding just `docker`. Docker is /usr/bin on Linux and /usr/local/bin on macOS,
+    and that macOS directory also holds `claude` -- which a test that wants no agent on PATH must
+    not pick up. So link the one binary rather than adding the directory it happens to live in."""
+    d = Path(tempfile.gettempdir()) / "stead-test-bin"
+    d.mkdir(exist_ok=True)
+    real = shutil.which("docker")
+    if real and not (d / "docker").exists():
+        (d / "docker").symlink_to(real)
+    return str(d)
+
+
+# The system tools and docker, nothing else: a test adds exactly one fake binary on top and then
+# knows what the agent can and cannot reach.
+BASE_PATH = f"/usr/bin:/bin:{_docker_only_bin()}"
+
+
+def assert_confined(probe: str, sandbox: str) -> None:
+    """The rule the bench must keep: a confined agent reaches neither the outside nor the answer.
+
+    The probe tries all three ways out -- the network, the sim container's docker socket, and the
+    specs, which carry every bug patch and gold window. Confinement differs by host, so what is
+    asserted is the property, not the mechanism: `seatbelt` on macOS, `userns` on Linux, and on a
+    host that can do neither, that the submission says `none` rather than claiming a fence it never
+    had. Asserting only the confined case would let the suite pass by accident wherever nothing is
+    actually confined -- which is how the sandbox stayed broken on macOS and on CI.
+    """
+    assert sandbox in ("seatbelt", "userns", "none"), sandbox
+    if sandbox == "none":
+        assert "net:" in probe, probe  # it reached the stack; only the transcript audit guards now
+        return
+    assert "specs: readable" not in probe, probe  # the answer key, whatever the mechanism
+    assert "docker: open" not in probe, probe
+    if sandbox == "userns":
+        assert "net: [Errno 101]" in probe, probe  # ENETUNREACH: no interface, not even loopback
+    else:
+        assert "net: open" not in probe, probe
+
+
 FAKE = "stead-fake"
 COMMIT = "0" * 40
 BROKEN = "1" * 40  # a second commit of the fake core: its clean tree already fails

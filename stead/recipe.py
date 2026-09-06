@@ -14,6 +14,7 @@ test that did not pass.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
@@ -21,6 +22,9 @@ from pathlib import Path
 
 from . import container
 from .fail import Stead, parse_log
+from .progress import timed
+
+logger = logging.getLogger("stead.recipe")
 
 RUN_SH = "/work/recipe/run.sh"
 TREE = "/work/tree"
@@ -63,7 +67,8 @@ def apply_patch(cid: str, patch: str, reverse: bool = False) -> None:
 
 
 def build(cid: str) -> None:
-    p = container.run(cid, RUN_SH, "build", TREE)
+    with timed(logger, "build"):
+        p = container.run(cid, RUN_SH, "build", TREE)
     if p.returncode != 0:
         raise BuildError(f"run.sh build -> exit {p.returncode}\n{p.stdout}\n{p.stderr}")
 
@@ -75,14 +80,17 @@ def run(cid: str, test: str, out_dir: Path, dump: bool = True) -> RunResult:
     inside = f"/out/{out_dir.name}"
     argv = (RUN_SH, "run", TREE, test, inside, f"--dump={'on' if dump else 'off'}")
     try:
-        p = container.run(cid, *argv, timeout=TEST_TIMEOUT)
+        with timed(logger, f"run {test}{'' if dump else ' (no dump)'}"):
+            p = container.run(cid, *argv, timeout=TEST_TIMEOUT)
     except subprocess.TimeoutExpired:  # the container was killed; nothing is left to copy
+        logger.warning("run %s: harness timeout after %ds; container killed", test, TEST_TIMEOUT)
         log.write_text(f"harness timeout after {TEST_TIMEOUT}s\n")
         return RunResult(RunStatus.CRASH, log, None, None)
     container.get(cid, inside, out_dir)
     if not log.exists():
         log.write_text(f"(no sim.log written by recipe; exit {p.returncode})\n{p.stderr}")
     status = _status(p.returncode)
+    logger.info("run %s -> %s", test, status.name)
     dumps = sorted(out_dir.glob("dump.*"))
     stead = parse_log(log) if status is RunStatus.FAIL else None
     return RunResult(status=status, log=log, dump=dumps[0] if dumps else None, stead=stead)
@@ -92,7 +100,8 @@ def suite(cid: str, out_dir: Path, regex: str = "") -> list[tuple[RunStatus, str
     """Every test's status, in suite order; failing tests have their sim.log under out_dir/<test>/.
     No cap here: stead_suite caps each test at TEST_TIMEOUT."""
     argv = (RUN_SH, "suite", TREE, "/out/suite", *([regex] if regex else []))
-    p = container.run(cid, *argv, env={"STEAD_TEST_TIMEOUT": str(TEST_TIMEOUT)})
+    with timed(logger, f"suite{f' ({regex})' if regex else ''}"):
+        p = container.run(cid, *argv, env={"STEAD_TEST_TIMEOUT": str(TEST_TIMEOUT)})
     if p.returncode != 0:
         raise BuildError(f"run.sh suite -> exit {p.returncode}\n{p.stdout}\n{p.stderr}")
     container.get(cid, "/out/suite", out_dir)

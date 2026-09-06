@@ -31,8 +31,8 @@ commit. Find the RTL line that caused it, fix it, and show your evidence.
 - The simulator: `sim` if you have it as a tool, otherwise `stead-sim <test> [--dump]`. It rebuilds
   your edited `tree/` and runs one test in the core's own simulator, and returns PASS, FAIL,
   BUILD_ERROR or CRASH with the log; `--dump` also writes `waves/sim.fst`. The test from the README
-  is the one to run. A rebuild takes seconds on small cores and minutes on cva6 and caliptra: use it
-  to confirm a fix, not to explore.
+  is the one to run. A rebuild costs anywhere from seconds to several minutes depending on the core;
+  the core's own skill section says which. Use it to confirm a fix, not to explore.
 - `tools/` may hold scripts specific to this core; the core's skill section says what they do.
 - Write your own. A query you would run twice belongs in a script under `tools/`: one purpose,
   standard library plus pywellen, a docstring with the usage line, arguments not hard-coded values,
@@ -71,8 +71,9 @@ commit. Find the RTL line that caused it, fix it, and show your evidence.
 
 Injected and real RTL bugs cluster in a few shapes. Check them in this order at the suspect block:
 
-- **A stray constant or flipped bit**: `^ 32'h10`, `| 1'b1`, an off-by-one literal, a wrong reset
-  value. E and A differ by a single bit or a small constant.
+- **A stray constant or flipped bit**: a literal XORed, ORed or added into an otherwise correct
+  expression, an off-by-one bound, a wrong reset value. E and A differ by a single bit or a small
+  constant, and the difference is the same every time the path is exercised.
 - **Wrong bit select or width**: `[31:1]` for `[30:0]`, sign extension where zero extension is
   meant, a truncated concatenation, byte lanes swapped. A differs in the top or bottom bits.
 - **Wrong operand, mux select, or opcode case**: the right operation on the wrong input, a case
@@ -105,9 +106,11 @@ Finish with one JSON object in a ```json block, and nothing after it:
 
 ```json
 {"k": 3,
- "lines": [{"file": "rtl/<file>.sv", "line": 123, "confidence": 0.7}],
+ "lines": [{"file": "<path/as/it/appears/under/tree>", "line": 123, "confidence": 0.7}],
  "text": "<one paragraph: what is wrong and why, with the evidence chain: signal, time, value, should be>"}
 ```
 
-`lines` is best first, at most `k`. Paths are relative to `tree/`. The patch is whatever you
-changed under `tree/`; it may touch `dut_paths` only.
+`lines` is best first, at most `k`. A path is exactly the path you opened, relative to `tree/` and
+nothing else: not the basename, not a guess at a conventional layout. It is matched literally, so
+`src/core/pipeline/foo.sv` is right and `rtl/foo.sv` is a miss even when it names the same file.
+The patch is whatever you changed under `tree/`; it may touch `dut_paths` only.

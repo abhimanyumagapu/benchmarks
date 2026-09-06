@@ -4,8 +4,10 @@ parsed, not trusted: anything malformed scores as a miss, never as a crash."""
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -14,7 +16,10 @@ from . import container
 from . import patch as patchlib
 from .case import Case
 from .gold import Gold
+from .progress import dur, timed
 from .recipe import BuildError, RunStatus, apply_patch, build, run
+
+logger = logging.getLogger("stead.score")
 
 
 def _line(ln: Any) -> dict[str, Any] | None:
@@ -46,6 +51,7 @@ class Submission:
     trial: int = 1
     attempts: int = 1
     flags: list[str] = field(default_factory=list)  # reached outside the folder; for a human to read
+    sandbox: str = ""  # "userns" if its commands were confined, "none" if they ran as they are
 
     @classmethod
     def load(cls, path: Path | str) -> Submission:
@@ -80,6 +86,7 @@ def score_patch(case_dir: Path, gold_dir: Path, patch: str) -> dict[str, Any]:
     res: dict[str, Any] = {"applied": False, "dut_only": True, "fixed": False, "status": None}
     outside = [f for f in patchlib.touched_files(patch) if not case.is_dut_path(f)]
     if outside:
+        logger.info("patch rejected: touches non-DUT files %s", outside)
         res["dut_only"] = False
         res["status"] = f"patch touches non-DUT files: {outside}"
         return res
@@ -90,6 +97,7 @@ def score_patch(case_dir: Path, gold_dir: Path, patch: str) -> dict[str, Any]:
         try:
             apply_patch(cid, patch)
         except BuildError as e:
+            logger.info("patch does not apply on top of the bug")
             res["status"] = str(e)
             return res
         res["applied"] = True
@@ -112,6 +120,7 @@ def score_patch(case_dir: Path, gold_dir: Path, patch: str) -> dict[str, Any]:
 
 
 def score_submission(case_dir: Path, gold_dir: Path, sub: Submission) -> dict[str, Any]:
+    t0 = time.monotonic()
     gold = Gold.load(Path(gold_dir) / "gold.yaml")
     case = Case.load(Path(case_dir) / "case.yaml")
     out: dict[str, Any] = {
@@ -126,11 +135,25 @@ def score_submission(case_dir: Path, gold_dir: Path, sub: Submission) -> dict[st
         "ran_at": sub.ran_at,
         "error": sub.error,
         "flags": sub.flags,
+        "sandbox": sub.sandbox,
         "k": sub.k,
     }
     out.update(score_lines(gold, sub.lines, sub.k))
     out["lines"] = sub.lines
-    out["patch"] = score_patch(case_dir, gold_dir, sub.patch) if sub.patch else None
+    if sub.patch:
+        with timed(logger, "score patch"):
+            out["patch"] = score_patch(case_dir, gold_dir, sub.patch)
+    else:
+        logger.info("no patch to score; lines only")
+        out["patch"] = None
     out["text"] = sub.text
     out["cost"] = sub.cost
+    # what scoring itself cost, which is a rebuild and a test run per patch and is the slow half of a run
+    out["score_wall_s"] = round(time.monotonic() - t0, 1)
+    logger.info(
+        "scored in %s: hit_rank=%s patch=%s",
+        dur(out["score_wall_s"]),
+        out["hit_rank"],
+        (out["patch"] or {}).get("fixed"),
+    )
     return out

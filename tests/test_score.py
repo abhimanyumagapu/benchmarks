@@ -3,7 +3,6 @@ named test and every test in also_fails, without touching the checker; the LLM's
 parsed, not trusted."""
 
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -12,10 +11,9 @@ from stead.bake import bake
 from stead.gold import Gold
 from stead.score import Submission, score_lines, score_patch, score_submission
 from stead.solve import parse_submission, solve
-from tests.conftest import FIX, FIX_PATCH, alu_patch, spec
+from tests.conftest import BASE_PATH, FIX, FIX_PATCH, alu_patch, assert_confined, spec
 
 G = Gold(file="rtl/ibex_alu.sv", start=384, end=388, klass="logic")
-NO_NET = 101 if shutil.which("unshare") else 111  # unreachable with the namespace, refused without it
 
 
 def gold_dir(case_dir: Path) -> Path:
@@ -95,7 +93,7 @@ def test_llm_answer_is_the_json_block_and_prose_alone_is_kept_as_text(tmp_path):
 
 
 def test_solve_gives_the_agent_a_writable_tree_and_takes_the_diff_as_patch(baked_case, tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", f"{FIX / 'fakeclaude'}:/usr/bin:/bin")
+    monkeypatch.setenv("PATH", f"{FIX / 'fakeclaude'}:{BASE_PATH}")
     monkeypatch.setenv("FAKECLAUDE_LOG", str(tmp_path / "argv.log"))
     path = solve(baked_case, gold_dir(baked_case), "claude+high", tmp_path / "results", trial=2)
     assert path.name == "claude+high.t2.json"
@@ -109,7 +107,7 @@ def test_solve_gives_the_agent_a_writable_tree_and_takes_the_diff_as_patch(baked
     argv = (tmp_path / "argv.log").read_text()
     assert not argv.startswith(str(baked_case))  # ran in the copy, not the case
     assert "--effort\nhigh\n" in argv and "stream-json" in argv
-    assert f"net: [Errno {NO_NET}]" in argv and "docker: open" not in argv  # no network, no docker
+    assert_confined(argv, sub["sandbox"])
     assert "sim: PASS xor_test" in argv and sub["cost"]["sims"] == 1  # it ran its fix in the core's simulator
     assert (Path(__file__).parent.parent / "skills" / "rtl-debug" / "SKILL.md").read_text().strip() in argv
     assert score_patch(baked_case, gold_dir(baked_case), sub["patch"])["fixed"] is True
@@ -134,8 +132,7 @@ def test_solve_runs_any_api_model_in_our_loop_with_tools_sandboxed_to_the_copy(
     transcript = [json.loads(ln) for ln in path.with_suffix(".trajectory.jsonl").read_text().splitlines()]
     assert [m["role"] for m in transcript] == ["user", *["assistant", "tool"] * 4, "assistant"]
     assert transcript[8]["content"].startswith("PASS xor_test")  # the sim tool's verdict on the fixed tree
-    probe = transcript[2]["content"]
-    assert f"net: [Errno {NO_NET}]" in probe and "docker: open" not in probe  # no network, no docker
+    assert_confined(transcript[2]["content"], sub["sandbox"])
     assert "-  assign y = (a ^ b) ^ 32'h10; // BUG" in sub["patch"]
     assert not (baked_case / "tree").exists() and "FAIL" in (baked_case / "logs" / "fail.log").read_text()
     system = (tmp_path / "system.md").read_text()
@@ -148,7 +145,7 @@ def test_solve_runs_any_api_model_in_our_loop_with_tools_sandboxed_to_the_copy(
 def test_an_agent_crash_is_a_recorded_miss_not_a_lost_case(baked_case, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="no-such-agent"):  # a typo is refused before anything runs
         solve(baked_case, gold_dir(baked_case), "no-such-agent", tmp_path / "results")
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # no `claude` here: the agent crashes at once
+    monkeypatch.setenv("PATH", BASE_PATH)  # no `claude` here: the agent crashes at once
     sub = Submission.load(solve(baked_case, gold_dir(baked_case), "claude", tmp_path / "results"))
     assert sub.error.startswith("FileNotFoundError") and sub.lines == [] and sub.patch is None
     assert sub.attempts == 3  # retried twice, then recorded

@@ -4,9 +4,12 @@ copied out. A container is a writable overlay on a core image: /work/recipe/run.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
+
+logger = logging.getLogger("stead.container")
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
@@ -17,6 +20,7 @@ def start(image: str) -> str:
     """A running container of `image`; returns its id."""
     cid = _docker("create", image, "sleep", "infinity").stdout.strip()
     _docker("start", cid)
+    logger.info("container %s from %s", cid[:12], image)
     return cid
 
 

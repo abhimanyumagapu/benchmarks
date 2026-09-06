@@ -15,6 +15,7 @@ the result for audit, and scanned for network or history access on the way.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -24,9 +25,12 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from .agents import ROOT, Run, claude_code, llm, sim, split_effort
+from .agents import ROOT, Run, claude_code, llm, sandbox_kind, sim, split_effort
 from .case import Case
+from .progress import dur, timed
 from .tree import materialize
+
+logger = logging.getLogger("stead.solve")
 
 RETRIES = 2  # more attempts after a crash (rate limit, container hiccup); a timeout is not retried
 FENCE = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)
@@ -102,12 +106,18 @@ def _attempt(case_dir: Path, gold_dir: Path, run: Callable[[Path], Run]) -> tupl
     tmp = Path(tempfile.mkdtemp(prefix="stead-solve-"))
     work = tmp / case_dir.name
     try:
-        _writable_copy(case_dir, gold_dir, work)
+        with timed(logger, "prepare copy"):
+            _writable_copy(case_dir, gold_dir, work)
         case = Case.load(case_dir / "case.yaml")
         try:
-            sim.start(work, case.image, (gold_dir / "bug.patch").read_text())  # its simulator, bug applied
-            res, error = run(work), None
+            with timed(logger, "start sim container"):
+                sim.start(work, case.image, (gold_dir / "bug.patch").read_text())  # simulator, bug applied
+            with timed(logger, "agent"):
+                res, error = run(work), None
         except Exception as e:  # every provider raises its own classes; a crash is a recorded miss
+            logger.warning(
+                "agent crashed: %s: %s", type(e).__name__, str(e).splitlines()[0] if str(e) else ""
+            )
             res, error = Run("", "", {"usd": 0.0}), e
         res.cost["sims"] = sim.calls(work)
         _git(work / "tree", "add", "-A")
@@ -125,6 +135,8 @@ def solve(case_dir: Path, gold_dir: Path, method: str, results_root: Path, trial
     attempts = 0
     while True:
         attempts += 1
+        if attempts > 1:
+            logger.info("retry %d of %d after a crash", attempts - 1, RETRIES)
         res, error, patch = _attempt(case_dir, gold_dir, run)
         if error is None or attempts > RETRIES or isinstance(error, subprocess.TimeoutExpired):
             break
@@ -139,6 +151,7 @@ def solve(case_dir: Path, gold_dir: Path, method: str, results_root: Path, trial
         "ran_at": ran_at,
         "error": f"{type(error).__name__}: {str(error)[:1500]}" if error else None,
         "flags": flags(res.transcript),
+        "sandbox": sandbox_kind(),  # "none" means only the transcript audit stood between it and the net
         "k": answer.get("k", 3),
         "lines": answer.get("lines", []),
         "patch": patch or None,
@@ -146,6 +159,14 @@ def solve(case_dir: Path, gold_dir: Path, method: str, results_root: Path, trial
         "answer": res.answer,  # the final message as the agent wrote it; the transcript has the rest
         "cost": {**res.cost, "wall_s": round(time.monotonic() - t0, 1)},
     }
+    logger.info(
+        "solved in %s: %d ranked line(s), %s patch, %d sim call(s), $%.2f",
+        dur(sub["cost"]["wall_s"]),
+        len(sub["lines"]),
+        "a" if patch else "no",
+        res.cost.get("sims", 0),
+        res.cost.get("usd", 0.0) or 0.0,
+    )
     path = result_path(results_root, case.id, method, trial)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sub, indent=2))
