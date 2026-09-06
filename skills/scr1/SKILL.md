@@ -38,17 +38,20 @@ compliance `compliance_<NAME>.hex` (`compliance_I-BLTU-01.hex`), arch tests `arc
 
 - `logs/fail.log`: the testbench's log: the test name, the STEAD line, `Test failed`, and the
   summary.
-- `logs/results.txt`: the per-test result line the testbench writes.
+- `logs/results.txt`: the per-test result line the testbench writes; `logs/test_info` names the test.
 
 ## Wave
 
 Hierarchy: `TOP.scr1_top_tb_axi.i_top.` then `i_core_top.i_pipe_top.<unit>`: `i_pipe_ifu`,
-`i_pipe_idu`, `i_pipe_exu` (the IALU is inside it as `i_ialu`), `i_pipe_lsu`, `i_pipe_mprf`,
-`i_pipe_csr`, `i_pipe_hdu`, `i_pipe_tdu`, `i_pipe_ipic`, and the tracer `i_tracelog`. The AXI
+`i_pipe_idu`, `i_pipe_exu`, `i_pipe_mprf`, `i_pipe_csr`, `i_pipe_hdu`, `i_pipe_tdu`, `i_pipe_ipic`,
+and the tracer `i_tracelog`. The IALU and the LSU are inside the EXU: `i_pipe_exu.i_ialu` and
+`i_pipe_exu.i_lsu` (there is no `i_pipe_lsu` in the wave, though the source file is
+`pipeline/scr1_pipe_lsu.sv`). The stage-to-stage buses are signals on `i_pipe_top` itself:
+`idu2exu_cmd`, `exu2mprf_rd_data`, `mprf2exu_rs1_data`, `lsu2tdu_d_mon`. The AXI
 memories are `i_dmem_axi` and `i_imem_axi`, the TCM is `i_tcm`. Dump time is in the testbench's
 time units with a 10-unit clock period; T is the write on the bus.
 
-From S at T: the write on `io_axi_dmem_wdata` came from a store; in `i_pipe_lsu` the data is
+From S at T: the write on `io_axi_dmem_wdata` came from a store; in `i_pipe_exu.i_lsu` the data is
 `exu2lsu_...` at the cycle before, which is a register value; in `i_pipe_mprf` find the write of
 that register (`exu2mprf_rd_data` with `exu2mprf_w_req`), which is the result of the instruction
 under suspicion; then `i_pipe_exu` and `i_ialu` at that cycle for the operation and operands.

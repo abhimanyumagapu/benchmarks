@@ -51,13 +51,15 @@ takes about three minutes.
 
 ## Wave
 
-Hierarchy: `TOP.caliptra_top_tb.caliptra_top_dut.` then the block instances (`sha256_inst`,
-`hmac_inst`, `kv_inst`, `soc_ifc_top1`, `aes_inst`, `abr_inst`, ...; check the wave for the exact
-name), the bus, and `initiator_inst` with the AHB signals `haddr`, `hwdata`, `hrdata`, `hwrite`,
-`htrans`, `hready`. Dump time of clock edge n is 100 × n + 50 (100 ps steps, the clock toggles
+Hierarchy: `TOP.caliptra_top_tb.caliptra_top_dut.` then the block instances, whose names do not
+follow one rule: `sha256`, `sha512`, `sha3`, `hmac`, `doe`, `csrng`, `entropy_src1`, `key_vault1`,
+`pcr_vault1`, `data_vault1`, `ecc_top1`, `soc_ifc_top1`, `aes_inst`, `abr_inst`, and the core
+`rvtop`. The bus is `ahb_lite_bus_i` with `responder_inst[0..18]`, and `initiator_inst` carries the
+AHB signals `haddr`, `hwdata`, `hrdata`, `hwrite`, `htrans`, `hready`. Dump time of clock edge n is 100 × n + 50 (100 ps steps, the clock toggles
 every 50), so the bus log's cycle n is at T = 100n + 50.
 
-From S at T: the bus log line at cycle T / 100 gives the address read; the block's register map
+From S at T: the bus log line at cycle (T - 50) / 100 gives the address read (AHB is pipelined, so
+that cycle is the data phase and the address went out the cycle before; `tools/bus.py` pairs them); the block's register map
 says which result register that is; inside the block, the value came from `hwif_in.<REG>.next`
 in the controller, fed by the core's output; walk the core's datapath back from the cycle it
 finished (`ready`/`valid` in the controller) to the round or step whose value is off.

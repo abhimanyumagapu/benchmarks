@@ -8,47 +8,52 @@
     python tools/bus.py <log> --writes                  writes only
     python tools/bus.py <log> --reads                   reads only
 
-Rows: cycle  dump_t  R|W  addr  data(32-bit lane)  hsize  hresp
+AHB-lite is pipelined: the address is on the bus one cycle, its data the next (with hready=1). A row
+here is one transfer, stamped with the cycle its DATA landed, which is the cycle the STEAD line names.
+
+Rows: cycle  dump_t  R|W  addr  data(the 32-bit lane the address selects)  hsize
 """
 
 import re
 import sys
 from pathlib import Path
 
+# cycleCnt : 0xhaddr hsize htrans hwrite 0xhrdata_hi_lo 0xhwdata_hi_lo hready hresp
 LSU = re.compile(
     r"^\s*(\d+) : 0x([0-9a-f]+) ([0-9a-f]+) ([0-9a-f]+) ([01]) 0x([0-9a-f]{8})_([0-9a-f]{8}) "
     r"0x([0-9a-f]{8})_([0-9a-f]{8}) ([01]) ([01])"
 )
+TRANS_NONSEQ = 2
+
 args = sys.argv[1:]
 if not args:
     sys.exit(__doc__)
 path, opts = args[0], args[1:]
-rows = []
+
+rows, pending = [], None
 for line in Path(path).read_text(errors="replace").splitlines():
     m = LSU.match(line)
     if not m:
         continue
-    cyc, addr, hsize, htrans, hwrite = (
-        int(m.group(1)),
-        int(m.group(2), 16),
-        m.group(3),
-        m.group(4),
-        m.group(5),
-    )
-    if htrans in ("0", "1"):  # IDLE / BUSY carry nothing
-        continue
-    lane = "hi" if addr & 4 else "lo"
-    rdata = m.group(6) if lane == "hi" else m.group(7)
-    wdata = m.group(8) if lane == "hi" else m.group(9)
-    rows.append((cyc, addr, hwrite == "1", int(wdata if hwrite == "1" else rdata, 16), hsize, m.group(11)))
+    cyc, haddr, hsize = int(m.group(1)), int(m.group(2), 16), m.group(3)
+    htrans, hwrite, hready = int(m.group(4), 16), m.group(5) == "1", m.group(10) == "1"
+    rdata = (int(m.group(6), 16) << 32) | int(m.group(7), 16)
+    wdata = (int(m.group(8), 16) << 32) | int(m.group(9), 16)
+    if pending and hready:  # data phase of the transfer whose address went out last cycle
+        addr, write, size = pending
+        both = wdata if write else rdata
+        rows.append((cyc, addr, write, (both >> 32) if addr & 4 else (both & 0xFFFFFFFF), size))
+        pending = None
+    if htrans == TRANS_NONSEQ and hready:  # address phase
+        pending = (haddr, hwrite, hsize)
 if not rows:
     sys.exit("no transfers found")
 
 
 def show(sel):
-    for cyc, addr, w, data, hsize, hresp in sel:
+    for cyc, addr, write, data, hsize in sel:
         print(
-            f"cycle={cyc:<8} dump_t={100 * cyc + 50:<10} {'W' if w else 'R'} 0x{addr:08x} 0x{data:08x} hsize={hsize} hresp={hresp}"
+            f"cycle={cyc:<8} dump_t={100 * cyc + 50:<10} {'W' if write else 'R'} 0x{addr:08x} 0x{data:08x} hsize={hsize}"
         )
 
 
