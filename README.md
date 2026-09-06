@@ -21,6 +21,8 @@ identically.
 
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
+- [Getting the cases](#getting-the-cases)
+- [Running your own bugs](#running-your-own-bugs)
 - [Running an evaluation](#running-an-evaluation)
 - [Results](#results)
 - [Case contents](#case-contents)
@@ -35,8 +37,9 @@ identically.
 ```bash
 git clone git@github.com:abhimanyumagapu/benchmarks.git && cd benchmarks
 uv sync && source .venv/bin/activate
-stead pull --all ghcr.io/abhimanyumagapu        # container images
-stead bake --all specs                          # build cases from specs
+stead pull --all ghcr.io/abhimanyumagapu               # container images
+gh release download cases-v1 -p 'stead-cases-*.tar.gz'   # pre-baked cases
+for f in stead-cases-*.tar.gz; do tar xzf "$f"; done
 export ANTHROPIC_API_KEY=...
 stead solve --all anthropic/claude-sonnet-4-5+high 3
 stead score --all
@@ -54,6 +57,79 @@ stead table
   also retrieves the shared toolchain layer.
 - **Credentials.** The API key for each provider evaluated must be present in the environment. No
   credentials are read from configuration files.
+
+## Getting the cases
+
+`cases/` and `gold/` are not in version control. They are derived from `specs/` and the images, and
+there are two ways to obtain them.
+
+**Download a pre-baked set.** One archive per core, published on the repository's releases page.
+
+```bash
+gh release download cases-v1 -p 'stead-cases-*.tar.gz' -p SHA256SUMS
+shasum -a 256 -c SHA256SUMS                          # verify the downloads
+for f in stead-cases-*.tar.gz; do tar xzf "$f"; done  # each unpacks at the repository root
+stead check --all                                    # validate them against the images
+```
+
+The archives are on the [releases page](https://github.com/abhimanyumagapu/HW-Benchmarker/releases).
+One tarball per core, so a single core can be taken on its own.
+
+**Or bake them.** Reproduces exactly the same tree from the specs, and is the only route for a bug
+that has not been published. It runs each test twice under simulation and captures a waveform, so it
+costs minutes per bug and requires every image.
+
+```bash
+stead bake --all specs
+```
+
+Baking is deterministic: an unpacked set and a locally baked one are byte-identical, and
+`stead check` holds against either.
+
+### What an archive contains
+
+```
+cases/<repo>/<id>/    case.yaml, logs/, waves/, README.md
+gold/<repo>/<id>/     gold.yaml, bug.patch
+MANIFEST.json         the images this set requires
+```
+
+Source trees are excluded. They are materialized on demand from the image each case records, so cases
+and images are distributed independently and an archive stays small — tens of megabytes per core,
+dominated by waveforms. The manifest names the images so they can be pulled selectively:
+
+```json
+{"repo": "ibex", "images": ["stead-ibex:34b0705"],
+ "cases": [{"id": "ibex-0001", "test": "rv32i/I-XOR-01", "class": "stuck-bit",
+            "image_digest": "sha256:21bae1f9..."}]}
+```
+
+### Publishing a set
+
+```bash
+stead ship --all dist                                   # honours --repo and --case
+gh release create cases-v1 dist/*.tar.gz --title 'Pre-baked cases v1'
+```
+
+`stead ship <case_dir>` produces a different artefact: a single case with its tree materialized and
+its gold withheld, for a closed tool that cannot run this harness.
+
+## Running your own bugs
+
+A downloaded set and locally authored bugs coexist. `bake` skips any spec that already has a case, so
+adding a spec and re-running it builds only the new one.
+
+```bash
+$EDITOR specs/ibex/ibex-0042.yaml            # and its patch, per Adding bugs below
+stead bake --all specs                       # builds ibex-0042; downloaded cases are untouched
+stead solve --all xai/grok-4.6 --case ibex-0042
+stead score --all --case ibex-0042
+stead table --case ibex-0042
+```
+
+A spec may target any core that has a `repos/<repo>/` recipe and an image. Results from local bugs
+sit alongside published ones in `results/`, so use `--case` or `--repo` when a page should cover only
+one or the other: a leaderboard mixing published and private cases is not comparable to either.
 
 ## Running an evaluation
 

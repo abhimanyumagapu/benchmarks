@@ -7,7 +7,8 @@
         method: claude | claude-<alias> | <provider>/<model>, with +<effort>; trials > 1 for pass@k
     score <submission.json> | score --all
     check <case_dir> | check --all
-    table | ship <case_dir> | validate <sim.log>
+    table | validate <sim.log>
+    ship <case_dir> | ship --all [<dist>]   one case with its tree, or a pre-baked set per core
 
 Any command that walks cases takes, anywhere in the line:
 
@@ -41,7 +42,7 @@ from .fail import parse_fail_line
 from .gold import Gold
 from .image import REPOS, TOOLS_TAG, build_core, build_tools, image_tag, pull, push, repo_cfg
 from .score import Submission, score_submission
-from .ship import ship
+from .ship import ship, ship_set
 from .solve import result_path, runner, solve
 from .table import page, summary
 from .validate import validate_stead
@@ -213,9 +214,24 @@ def cmd_pull(what: str, registry: str) -> int:
     return 0
 
 
-def cmd_ship(case_dir: str) -> int:
-    print(ship(Path(case_dir), _gold_dir(Path(case_dir)), Path("dist")))
-    return 0
+def cmd_ship(case_dir: str, dist: str = "dist") -> int:
+    """One case with its tree for a closed tool, or --all: a pre-baked set per core.
+
+    The set is what spares someone the bake, which is minutes per bug and needs every image. It
+    carries the cases and their gold and unpacks at the bench root; `stead check --all` then proves
+    it landed intact against the images.
+    """
+    if case_dir != "--all":
+        print(ship(Path(case_dir), _gold_dir(Path(case_dir)), Path(dist)))
+        return 0
+    cases = _cases()
+    repos = sorted({c.parent.name for c in cases})
+    return _run_all(
+        "packing",
+        [(len(repos) or 1, repos)],
+        lambda repo: repo,
+        lambda repo: ship_set(repo, [c for c in cases if c.parent.name == repo], GOLD, Path(dist)),
+    )
 
 
 def _score(sub_path: Path) -> dict:

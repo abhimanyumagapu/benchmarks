@@ -66,6 +66,20 @@ def apply_patch(cid: str, patch: str, reverse: bool = False) -> None:
         raise BuildError(f"patch does not apply: {p.stderr}")
 
 
+def patch_applies(cid: str, patch: str) -> None:
+    """Raise BuildError unless `patch` would apply to the tree.
+
+    `git apply --check` writes nothing, so the image's warm build survives it. Bake calls this before
+    the clean run: a patch with a stale line number or a wrong context line is then a second's work
+    to find, not a full test run on cva6 or caliptra.
+    """
+    container.put(cid, patch, "/work/check.diff")
+    p = container.run(cid, "git", "apply", "--check", "/work/check.diff", cwd=TREE)
+    container.run(cid, "rm", "-f", "/work/check.diff")
+    if p.returncode != 0:
+        raise BuildError(f"patch does not apply: {p.stderr}")
+
+
 def build(cid: str) -> None:
     with timed(logger, "build"):
         p = container.run(cid, RUN_SH, "build", TREE)

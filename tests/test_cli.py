@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 from stead.__main__ import bake_all
-from stead.ship import ship
+from stead.ship import ship, ship_set
 from tests.conftest import BROKEN, BUG_PATCH, COMMIT
 
 ENV = {
@@ -130,3 +130,25 @@ def test_ship_tars_the_case_folder_with_a_tree_and_no_gold(baked_case, tmp_path)
     assert "fake-0001/case.yaml" in names and "fake-0001/tree/rtl/alu.sv" in names
     assert not any("gold" in n or "bug.patch" in n or "build" in n for n in names)
     assert not (baked_case / "tree").exists()
+
+
+def test_ship_all_packs_a_repo_set_that_unpacks_at_the_bench_root(baked_case, tmp_path):
+    """The pre-baked set spares a bake, so it must carry everything a bake produces and land where
+    the harness already looks. It carries gold -- unlike a single shipped case -- because solve
+    cannot build the buggy tree without the bug patch. It carries no tree: that comes from the
+    image, which is why cases and images travel apart."""
+    tar_path = ship_set("fake", [baked_case], tmp_path / "gold", tmp_path / "out")
+    with tarfile.open(tar_path) as t:
+        names = t.getnames()
+        manifest = json.loads(t.extractfile("MANIFEST.json").read())
+    assert tar_path.name == "stead-cases-fake.tar.gz"
+    # paths are relative to the bench root, so `tar xzf` in it puts both trees where they belong
+    assert "cases/fake/fake-0001/case.yaml" in names
+    assert "gold/fake/fake-0001/bug.patch" in names and "gold/fake/fake-0001/gold.yaml" in names
+    assert not any("/tree/" in n for n in names)  # materialized from the image, never shipped
+    # the manifest says which images this set needs, before anyone downloads gigabytes of them
+    case = yaml.safe_load((baked_case / "case.yaml").read_text())
+    assert manifest["repo"] == "fake" and manifest["images"] == [case["image"]]
+    assert manifest["cases"][0]["image_digest"] == case["image_digest"]  # check --all can verify it
+    assert [c["id"] for c in manifest["cases"]] == ["fake-0001"]
+    assert manifest["cases"][0]["class"] == "logic"

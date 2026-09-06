@@ -21,7 +21,7 @@ from . import patch as patchlib
 from .case import Case, matches_any
 from .fail import Stead, parse_log
 from .gold import Gold
-from .recipe import BuildError, RunResult, RunStatus, apply_patch, build, run, suite
+from .recipe import BuildError, RunResult, RunStatus, apply_patch, build, patch_applies, run, suite
 from .validate import validate_stead
 
 
@@ -74,6 +74,7 @@ def _expect(res: RunResult, status: RunStatus, what: str) -> None:
 
 
 def _runs_fixed(spec: BakeSpec, cid: str, work: Path) -> Runs:
+    patch_applies(cid, spec.bug_patch)  # before the clean run: a bad patch should not cost one
     logger.info("run %s on clean tree", spec.test)
     clean = run(cid, spec.test, work / "run_pass", dump=KEEP_PASS)
     _expect(clean, RunStatus.PASS, "clean")
