@@ -32,8 +32,9 @@ handing back the same file and scored the same way.
 
 ```bash
 git clone git@github.com:abhimanyumagapu/benchmarks.git && cd benchmarks
-pip install -e '.[dev]'
-stead pull --all ghcr.io/abhimanyumagapu           # the images, once (~18 GB)
+uv sync && source .venv/bin/activate              # or: pip install -e '.[dev]'
+stead pull --all ghcr.io/abhimanyumagapu           # the images, once (~18 GB; or one core: stead pull scr1 ...)
+stead bake --all specs                             # the cases, from the specs, on those images
 export ANTHROPIC_API_KEY=...
 stead solve --all anthropic/claude-sonnet-4-5+high 3   # <provider>/<model>[+<effort>] [trials]
 stead score --all
@@ -42,8 +43,11 @@ stead table                                        # -> results/table.md
 
 ## Installation
 
-- Linux, Docker with BuildKit (`docker.io docker-buildx`), your user in the `docker` group.
-- Python 3.10+: `conda create -n stead python=3.13; conda activate stead; pip install -e '.[dev]'`.
+- Linux, Docker with BuildKit (`docker.io docker-buildx`), your user in the `docker` group. Or an
+  Apple Silicon Mac with Docker Desktop or OrbStack, memory set to 16 GB or more so cva6 and caliptra
+  build; the images are arm64.
+- Python 3.10+. `uv sync` installs the locked versions (`uv.lock`) into `.venv`; `pip install -e '.[dev]'`
+  works too.
 - Disk: 18 GB for all five cores, under 9 GB for one. Pulling one core brings the shared toolchain
   layer with it: `stead pull scr1 ghcr.io/abhimanyumagapu`.
 - The key of the provider you run, in the environment. Nothing is read from a config file.
@@ -64,8 +68,12 @@ four at a time. A method is a model string or an agent name:
 
 Any provider litellm knows works the same way. `+<effort>` sets reasoning effort and is recorded.
 Every model gets the same system prompt (`prompts/system.md`), the same skill
-(`skills/rtl-debug/SKILL.md`) and the same five tools: read, grep, glob, edit under `tree/`, python
-with pywellen for the waves. `claude` methods run Claude Code headless with its own tools.
+(`skills/rtl-debug/SKILL.md`, plus `skills/<repo>/SKILL.md` for that core when it exists) and the
+same tools: read, grep, glob, edit under `tree/`, python with pywellen for the waves, and `sim`,
+which rebuilds its edited tree and runs one test in the core's own simulator. `claude` methods run
+Claude Code headless with its own tools plus `stead-sim`. The case folder also carries `tools/`:
+generic scripts from `skills/tools/` (`sim.py`, `wave.py`) and the core's own from
+`skills/<repo>/tools/`.
 
 Trials is how many times each case is run. Models are not deterministic, so `3` runs every case
 three times; a case is resolved if any trial hits, which is pass@3. Cost adds up across trials.
@@ -81,11 +89,16 @@ gold window, and the patch by re-running the tests in a fresh container.
 ## Results
 
 ```
-results/<case>/<method>.json               what the tool handed back, never rewritten
+results/<case>/<method>.json               what the tool handed back (ranked lines, patch, text, the
+                                           raw final message), never rewritten
 results/<case>/<method>.score.json         its verdict
-results/<case>/<method>.trajectory.jsonl   its transcript
+results/<case>/<method>.trajectory.jsonl   its transcript: every message, tool call and tool result,
+                                           and the model's reasoning where the provider returns it
 results/table.md                           the page
 ```
+
+`cases/` and `gold/` are not in git: they are what `stead bake` makes from `specs/` and the images,
+identically on every machine. The specs are the source of the benchmark.
 
 The page leads with one row per method: resolved rate (gold line in the top k), agent and effort,
 trials, when it ran, hit@k, file@k, patches fixed, errors, flagged runs, total cost and wall time.
@@ -96,8 +109,8 @@ and running `stead score --all`.
 
 `cases/<repo>/<id>/`:
 
-- `logs/fail.log`, `logs/pass.log`: the test on the buggy tree and on the clean tree.
-- `waves/fail.fst`, `waves/pass.fst`: the dumps of both runs.
+- `logs/fail.log`: the failing run.
+- `waves/fail.fst`: its dump.
 - `case.yaml`: repo, commit, image and its id, the test, the STEAD record, other tests the bug
   breaks (`also_fails`), DUT and checker paths.
 - `README.md`: the brief the tool reads first.
@@ -107,8 +120,10 @@ holds the recorded wrong value at the recorded time. A case whose checker gives 
 ships with `stead: null`.
 
 The tree is not in the case. It is materialized from the image on demand, with the bug applied and
-exactly the files of the pinned commit, no `.git` and no build output, so the tool reads the code but
-can never diff it. The bug patch and the gold window live in `gold/<repo>/<id>/`, never in the case.
+exactly the files of the case's commit, no `.git` and no build output, so the tool reads the code but
+can never diff it. The clean run is verified at bake time but not shipped: a passing wave next to the
+failing one would hand over the answer. The bug patch and the gold window live in
+`gold/<repo>/<id>/`, never in the case. The tool's python runs with the network off.
 
 ## Scoring
 
@@ -133,6 +148,7 @@ id: scr1-0007
 test: arch_xor-01.hex            # or: auto, with suite: <regex> to screen a subset
 bug_patch: scr1-0007.patch
 gold: {file: src/core/pipeline/scr1_pipe_ialu.sv, start: 571, end: 571, class: stuck-bit}
+commit: 8b1712f                  # optional: another commit of the core; default is repo.yaml's
 ```
 
 ```
@@ -143,7 +159,8 @@ stead check --all                # every case: image id, STEAD vs wave, clean PA
 Bake runs the test clean, applies the bug, rebuilds, runs it again with the dump on, validates the
 STEAD line, and writes the case. A spec is refused if the clean tree fails, the buggy tree passes or
 crashes, or the patch leaves the DUT. With `test: auto` the whole suite runs on the buggy tree and the
-failing test is picked; name the test on cva6 and caliptra, where the full suite takes hours.
+failing test is picked; name the test on cva6 and caliptra, where the full suite takes hours. A spec
+with a `commit:` bakes on that commit's image, built with `stead image <repo> <mirror> <commit>`.
 
 Per bug on one machine: scr1 and ibex under a minute, rocket-chip 1.5 min, cva6 and caliptra 5 to
 8 min. `bake --all` runs one repo at a time, `jobs` containers in parallel, and skips specs that
@@ -163,15 +180,26 @@ already have a case.
   `run` writes `<out>/sim.log`, with the STEAD FAIL line on a value-check fail, and `<out>/dump.fst`
   when the dump is on. `suite` writes `<out>/summary.txt`, one `<exit> <test>` per test.
 - `shim.patch` (optional): a testbench edit that prints the STEAD line; it may not touch `dut_paths`.
+  It is applied to the exported tree before the build, file by file: a hunk that has since landed
+  upstream is skipped, a file the shim does not fit fails at `stead image`, before any case exists.
+  That is also where a core's own late build fixes go so older commits build on the pinned toolchain
+  (scr1 carries two such hunks). The three shims (scr1, rocket-chip, cva6) reach a year back. The
+  toolchain sets the other limit: scr1, rocket-chip and cva6 build and bake a year back; ibex and
+  caliptra three months back, not twelve (older fusesoc, a Verilator warning turned fatal, firmware C
+  that GCC 15 rejects).
 
 ```
 stead image tools ~/stead-tools              # the toolchain image, once per machine
-stead image <repo> ~/mirrors/<repo>          # export the commit from a mirror, apply the shim, warm build
+stead image <repo> ~/mirrors/<repo> [<commit>]   # export the commit from a mirror, apply the shim, warm build
 stead push --all ghcr.io/abhimanyumagapu     # after `docker login ghcr.io`
 ```
 
-Editing any of the three files means `stead image <repo>` again: a case records the image id it was
-baked from and `stead check` refuses any other. Cores are never vendored; the image holds the tree.
+Editing `run.sh` or the shim means `stead image <repo>` again: a case records the image id it was
+baked from and `stead check` refuses any other. `repo.yaml` is read on the host only, so `jobs` and
+paths can change without a rebuild. Cores are never vendored; the image holds the tree.
+One image per distinct commit, all on the shared toolchain layer; a submodule the mirror lacks at an
+older commit is cloned or fetched into the mirror on the way. `stead pull --all` fetches every image
+any case records.
 
 ## Repository layout
 

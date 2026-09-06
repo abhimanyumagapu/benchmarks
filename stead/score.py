@@ -38,6 +38,7 @@ class Submission:
     lines: list[dict[str, Any]] = field(default_factory=list)
     patch: str | None = None
     text: str | None = None
+    answer: str = ""  # the raw final message
     cost: dict[str, Any] = field(default_factory=dict)
     ran_at: str = ""
     error: str | None = None  # the agent crashed; scored as a miss, counted separately

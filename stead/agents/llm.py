@@ -15,7 +15,10 @@ import sys
 from itertools import islice
 from pathlib import Path
 
-from . import PROMPT, Run, system_prompt
+from stead.case import Case
+
+from . import PROMPT, Run, sandbox, system_prompt
+from .sim import sim as run_sim
 
 MAX_TURNS = 80
 MAX_OUT = 20_000  # chars of one tool result the model sees
@@ -63,6 +66,20 @@ TOOLS = [
                 "type": "object",
                 "properties": {"path": STRING, "old": STRING, "new": STRING},
                 "required": ["path", "old", "new"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sim",
+            "description": "Rebuild your edited tree and run one test in the core's simulator; returns PASS, "
+            "FAIL, BUILD_ERROR or CRASH and the log. Minutes on big cores: confirm a fix, do not explore. "
+            "dump=true also writes waves/sim.fst.",
+            "parameters": {
+                "type": "object",
+                "properties": {"test": STRING, "dump": {"type": "boolean"}},
+                "required": ["test"],
             },
         },
     },
@@ -120,14 +137,28 @@ def _edit(work: Path, path: str, old: str, new: str) -> str:
 def _python(work: Path, code: str) -> str:
     try:
         res = subprocess.run(
-            [sys.executable, "-c", code], cwd=work, text=True, capture_output=True, timeout=300, check=False
+            [str(sandbox(work / ".bin") / "sandbox"), sys.executable, "-c", code],
+            cwd=work,
+            text=True,
+            capture_output=True,
+            timeout=300,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return "error: timeout after 300 s"
     return (res.stdout + res.stderr) or "(no output)"
 
 
-CALLS = {"read": _read, "grep": _grep, "glob": _glob, "edit": _edit, "python": _python}
+def _sim(work: Path, test: str, dump: bool = False) -> str:
+    try:
+        return run_sim(work, test, dump)
+    except (
+        subprocess.CalledProcessError
+    ) as e:  # docker itself failed; the verdict is a crash, not a lost trial
+        return f"CRASH {test}\n{(e.stderr or str(e))[-2000:]}"
+
+
+CALLS = {"read": _read, "grep": _grep, "glob": _glob, "edit": _edit, "sim": _sim, "python": _python}
 
 
 def call(work: Path, name: str, arguments: str) -> str:
@@ -175,7 +206,8 @@ def _plain(msg) -> dict:
 
 def run(work: Path, model: str, effort: str = "") -> Run:
     """Tool loop until the model answers without a tool call, or MAX_TURNS, then one last answer."""
-    msgs: list = [{"role": "system", "content": system_prompt()}, {"role": "user", "content": PROMPT}]
+    repo = Case.load(work / "case.yaml").repo
+    msgs: list = [{"role": "system", "content": system_prompt(repo)}, {"role": "user", "content": PROMPT}]
     usage = {"usd": 0.0, "tokens_in": 0, "tokens_out": 0, "turns": 0}
     for _ in range(MAX_TURNS):
         msg = _step(msgs, model, effort, "auto", usage)

@@ -3,7 +3,7 @@ repo: cva6
 url: https://github.com/openhwgroup/cva6.git
 commit: e643a3953d3945319ef5a95b6091b510fb8f157d
 image: stead-cva6:e643a39
-image_digest: sha256:1d3c5f0daab41dd1ef3af548d6c329591f3ad60282ed596827da5344ac875d2a
+image_digest: sha256:0385160321171ef353cecb495faabdd53e99c174f3cb8c83cef125cb1f7129b4
 test: rv64ui-p-xor
 dump: waves/fail.fst
 validated_on: verilator-5.050

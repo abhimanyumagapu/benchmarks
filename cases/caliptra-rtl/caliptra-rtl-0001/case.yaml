@@ -3,7 +3,7 @@ repo: caliptra-rtl
 url: https://github.com/chipsalliance/caliptra-rtl.git
 commit: 1f272de5be683cce9146614a1537bb0db45ec392
 image: stead-caliptra-rtl:1f272de
-image_digest: sha256:c3628cd125760738286ccd572f67d26e8828f1be8c2ed2131d70cfd46e870c4a
+image_digest: sha256:6f7cb6cee1ded07a47fdb46c0e41699665d5c9f5db199fc389b7b522e502994c
 test: smoke_test_sha256
 dump: waves/fail.fst
 validated_on: verilator-5.050

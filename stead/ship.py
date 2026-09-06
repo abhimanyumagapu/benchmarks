@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from .case import Case
+from .solve import add_tools
 from .tree import materialize
 
 
@@ -19,9 +20,11 @@ def ship(case_dir: Path, gold_dir: Path, dist: Path) -> Path:
     tmp = Path(tempfile.mkdtemp(prefix="stead-ship-"))
     try:
         materialize(case.image, (gold_dir / "bug.patch").read_text(), tmp / "tree")
+        add_tools(tmp, case.repo)
         with tarfile.open(tar, "w:gz") as t:
             t.add(case_dir, arcname=case_dir.name)
             t.add(tmp / "tree", arcname=f"{case_dir.name}/tree")
+            t.add(tmp / "tools", arcname=f"{case_dir.name}/tools")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return tar

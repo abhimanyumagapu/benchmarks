@@ -2,8 +2,13 @@
 # Fake `claude`: answers --version; otherwise records argv and cwd, fixes the bug in the
 # writable tree copy it was given, and answers in stream-json: one assistant event, one result.
 [ "$1" = "--version" ] && { echo "claude 9.9.9 (fake)"; exit 0; }
-printf '%s\n' "$PWD" "$@" > "${FAKECLAUDE_LOG:-/dev/null}"
+probe=$(python -c "import socket
+for name, fn in (('net', lambda: socket.create_connection(('127.0.0.1', 1), timeout=1)), ('docker', lambda: socket.socket(socket.AF_UNIX).connect('/var/run/docker.sock'))):
+    try: fn(); print(name + ': open')
+    except OSError as e: print(name + ':', e)" 2>&1)
+printf '%s\n' "$PWD" "$probe" "$@" > "${FAKECLAUDE_LOG:-/dev/null}"
 sed -i.bak "s/(a ^ b) ^ 32'h10; \/\/ BUG/a ^ b;/" tree/rtl/alu.sv && rm -f tree/rtl/alu.sv.bak
+echo "sim: $(stead-sim xor_test 2>&1 | head -1)" >> "${FAKECLAUDE_LOG:-/dev/null}"   # confirm the fix in the simulator
 echo "module helper; endmodule" > tree/rtl/new.sv   # a file the agent created must be in the patch too
 cat <<'JSON'
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the log."}]}}

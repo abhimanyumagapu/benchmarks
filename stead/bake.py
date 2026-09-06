@@ -56,6 +56,7 @@ class Runs:
 
 
 logger = logging.getLogger("stead.bake")
+KEEP_PASS = False  # ship the clean run's log and wave too; off: a pass wave hands the solver the diff
 
 
 def _build(cid: str, what: str) -> None:
@@ -74,7 +75,7 @@ def _expect(res: RunResult, status: RunStatus, what: str) -> None:
 
 def _runs_fixed(spec: BakeSpec, cid: str, work: Path) -> Runs:
     logger.info("run %s on clean tree", spec.test)
-    clean = run(cid, spec.test, work / "run_pass")
+    clean = run(cid, spec.test, work / "run_pass", dump=KEEP_PASS)
     _expect(clean, RunStatus.PASS, "clean")
     apply_patch(cid, spec.bug_patch)
     _build(cid, "buggy")
@@ -105,14 +106,22 @@ def _runs_auto(spec: BakeSpec, cid: str, work: Path) -> Runs:
     _expect(buggy, RunStatus.FAIL, "buggy")
     apply_patch(cid, spec.bug_patch, reverse=True)
     _build(cid, "clean")
-    clean = run(cid, test, work / "run_pass")
+    clean = run(cid, test, work / "run_pass", dump=KEEP_PASS)
     _expect(clean, RunStatus.PASS, "clean")
     return Runs(test, also, clean, buggy)
 
 
+LOG_MAX = 20_000_000  # bytes; a trace bigger than this stays out of the case
+
+
 def _keep(res: RunResult, work: Path, name: str) -> str | None:
-    """Copy a run's log and dump into the case; return the dump's relative path."""
+    """Copy a run's sim.log as <name>.log, every other log it wrote by its own name, and its dump;
+    return the dump's relative path."""
     shutil.copy(res.log, work / "logs" / f"{name}.log")
+    for f in sorted(res.log.parent.iterdir()):
+        small = f.is_file() and f.suffix != ".elf" and f.stat().st_size <= LOG_MAX
+        if small and f not in (res.log, res.dump):
+            shutil.copy(f, work / "logs" / f.name)
     if res.dump is None:
         return None
     rel = f"waves/{name}{res.dump.suffix}"
@@ -156,7 +165,8 @@ def bake(spec: BakeSpec) -> Path:
         (work / "logs").mkdir(parents=True)
         (work / "waves").mkdir()
         runs = _runs_auto(spec, cid, work) if spec.test == "auto" else _runs_fixed(spec, cid, work)
-        _keep(runs.clean, work, "pass")
+        if KEEP_PASS:
+            _keep(runs.clean, work, "pass")
         dump_rel = _keep(runs.buggy, work, "fail")
         stead, note = _resolve_stead(runs.buggy, dump_rel)
         for d in ("run_pass", "run_fail", "suite"):
@@ -209,8 +219,9 @@ unmodified commit.{also} Find the cause.
 
 - `tree/` — the full buggy source tree, design docs included. The bug may be in the DUT
   ({c.dut_paths}) or in the testbench ({c.checker_paths}); say which.
-- `logs/fail.log`, `logs/pass.log` — the failing run and the clean-tree run of the same test.
-- `waves/` — the dumps of both runs (`{c.dump or "none"}` is the fail wave).
+- `logs/fail.log` — the failing run's verdict, and next to it every other log that run wrote
+  (traces, console, bus logs). `tools/` — scripts for them; the skill says what each does.
+- `waves/` — the failing run's dump (`{c.dump or "none"}`).
 
 ## STEAD
 

@@ -54,6 +54,7 @@ max-statements = 50
 [tool.ruff.lint.per-file-ignores]
 "stead/__main__.py" = ["T201"]   # the CLI prints its result
 "repos/**/*.py" = ["T201", "E501"]  # joiners print the one-line STEAD format; that is their output
+"skills/**/*.py" = ["T201", "E501"]  # the agent's scripts print their answer
 
 [tool.ruff.format]
 docstring-code-format = true

@@ -4,10 +4,14 @@ stream-json gives every message as it happens; the last event carries the answer
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
-from . import PROMPT, Run, system_prompt
+from stead.case import Case
+
+from . import PROMPT, Run, sandbox, system_prompt
 
 TOOLS = [
     "Read",
@@ -16,6 +20,7 @@ TOOLS = [
     "Edit",
     "Write",
     "Bash(python:*)",
+    "Bash(stead-sim:*)",
     "Bash(ls:*)",
     "Bash(head:*)",
     "Bash(grep:*)",
@@ -35,8 +40,17 @@ def run(work: Path, method: str, effort: str = "") -> Run:
     model = ["--model", method[len("claude-") :]] if method != "claude" else []
     cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", *model]
     cmd += ["--effort", effort] if effort else []
-    cmd += ["--allowedTools", *TOOLS, "--append-system-prompt", system_prompt(), PROMPT]
-    proc = subprocess.run(cmd, cwd=work, text=True, capture_output=True, check=False, timeout=TIMEOUT)
+    repo = Case.load(work / "case.yaml").repo
+    cmd += ["--allowedTools", *TOOLS, "--append-system-prompt", system_prompt(repo), PROMPT]
+    bin_dir = sandbox(work / ".bin")
+    (bin_dir / "stead-sim").write_text(
+        f'#!/bin/sh\nexec {sys.executable} tools/sim.py "$@"\n'
+    )  # needs docker: outside the sandbox
+    (bin_dir / "stead-sim").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    proc = subprocess.run(
+        cmd, cwd=work, text=True, capture_output=True, check=False, timeout=TIMEOUT, env=env
+    )
     if proc.returncode:
         raise RuntimeError(f"claude exit {proc.returncode}: {proc.stderr[-1500:]}")
     events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]

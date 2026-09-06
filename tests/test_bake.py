@@ -9,7 +9,7 @@ from stead import container
 from stead.bake import BakeError, bake
 from stead.case import Case
 from stead.gold import Gold
-from stead.image import build_core, export
+from stead.image import apply_shim, build_core, export
 from stead.recipe import BuildError, RunStatus, build, run
 from stead.tree import materialize
 from tests.conftest import BUG_PATCH, FAKE, alu_patch, git, spec
@@ -21,7 +21,7 @@ def test_bake_writes_case_with_stead_and_gold_outside_it(tmp_path):
     assert c.image == FAKE and c.image_digest.startswith("sha256:") and c.dump == "waves/fail.vcd"
     assert c.stead.actual == 0xFFFFF810 and c.stead.dump == "waves/fail.vcd" and c.also_fails == []
     assert not (case_dir / "tree").exists()
-    assert (case_dir / "logs" / "pass.log").exists() and (case_dir / "waves" / "pass.vcd").exists()
+    assert not (case_dir / "logs" / "pass.log").exists() and not (case_dir / "waves" / "pass.vcd").exists()
     assert not list(case_dir.rglob("gold.yaml")) and not list(case_dir.rglob("bug.patch"))
     g = Gold.load(tmp_path / "gold" / "fake" / "fake-0001" / "gold.yaml")
     assert g.hit("rtl/alu.sv", 2) and not g.hit("rtl/alu.sv", 3) and not g.hit("dv/tb.sv", 2)
@@ -58,7 +58,6 @@ def test_auto_test_is_found_by_the_suite_and_the_rest_are_recorded(tmp_path):
     case_dir = bake(spec(tmp_path, test="auto", bug_patch=alu_patch("  assign y = a; // BUG XORBUG")))
     c = Case.load(case_dir / "case.yaml")
     assert c.test == "sub_test" and c.also_fails == ["xor_test"]
-    assert "PASS  test=sub_test" in (case_dir / "logs" / "pass.log").read_text()
     assert c.stead is not None
     with pytest.raises(BakeError, match="suite passed"):
         bake(spec(tmp_path, id="fake-0002", test="auto", bug_patch=alu_patch("  assign y = a; // harmless")))
@@ -110,3 +109,16 @@ def test_export_is_the_commit_with_submodules_and_nothing_untracked(src_repo, tm
     assert not (out / "build").exists() and not list(out.rglob(".git"))
     assert manifest == sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file())
     assert "deps/sub/vendor/lib.sv" in manifest and ".gitmodules" in manifest
+
+
+def test_shim_applies_per_file_and_a_hunk_already_upstream_is_skipped(src_repo, tmp_path):
+    tree = tmp_path / "tree"
+    export(src_repo, "HEAD", tree)
+    shim = tmp_path / "shim.patch"
+    hunk = '@@ -1,2 +1,3 @@\n module tb;\n+  initial $display("STEAD");\n endmodule\n'
+    shim.write_text("--- a/dv/tb.sv\n+++ b/dv/tb.sv\n" + hunk)
+    assert apply_shim(tree, shim) == []  # applied
+    assert apply_shim(tree, shim) == ["dv/tb.sv"]  # a second time: already there, skipped, not an error
+    (tree / "dv" / "tb.sv").write_text("module tb;\n  something else entirely\nendmodule\n")
+    with pytest.raises(ValueError, match="does not fit dv/tb.sv"):
+        apply_shim(tree, shim)

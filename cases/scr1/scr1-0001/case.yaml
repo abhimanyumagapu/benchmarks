@@ -3,7 +3,7 @@ repo: scr1
 url: https://github.com/syntacore/scr1.git
 commit: ebb5e3551a9d93c0ee95f0b767dd878b8927e702
 image: stead-scr1:ebb5e35
-image_digest: sha256:8dfc1c9dd74e46ca9fd130404189049b1cd7ee135b0bbf924d93630dec6c8585
+image_digest: sha256:73f2bb231bbad10bba9f9826bfe0ef241b7c59b3d9226558fcc26363d6cb30b6
 test: arch_xor-01.hex
 dump: waves/fail.fst
 validated_on: verilator-5.050

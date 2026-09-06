@@ -3,4 +3,4 @@ commit: e643a3953d3945319ef5a95b6091b510fb8f157d
 validated_on: verilator-5.050
 dut_paths: [core/**]
 checker_paths: [corev_apu/tb/**, verif/**, tools/**, config/**]
-jobs: 2
+jobs: 1  # two cva6 rebuilds at once exhaust 7 GB; raise on a bigger box

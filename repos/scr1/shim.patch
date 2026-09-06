@@ -412,3 +412,31 @@ index aea666e..37d84bc 100644
                  `ifdef SIGNATURE_OUT
                      b_single_run_flag = 0;
                  `endif
+diff --git a/sim/tests/riscv_isa/test_macros.h b/sim/tests/riscv_isa/test_macros.h
+index 743918d..115fece 100644
+--- a/sim/tests/riscv_isa/test_macros.h
++++ b/sim/tests/riscv_isa/test_macros.h
+@@ -1,5 +1,7 @@
+ #ifndef __TEST__MACROS__H
+ #define __TEST__MACROS__H
+ 
++#define sptbr satp
++#define mbadaddr mtval
+ 
+-#endif
++#endif
+\ No newline at end of file
+diff --git a/sim/tests/riscv_arch/arch_test.h b/sim/tests/riscv_arch/arch_test.h
+index 12dee59..7f234b4 100644
+--- a/sim/tests/riscv_arch/arch_test.h
++++ b/sim/tests/riscv_arch/arch_test.h
+@@ -582,7 +582,9 @@ rvtest_data_end:
+ 
+ #define TEST_JALR_OP(tempreg, rd, rs1, imm, swreg, offset,adj) \
+ 5:                                            ;\
++    .if rd != x0 ;\
+     LA(rd,5b                                 ) ;\
++    .endif ;\
+     .if adj & 1 == 1                          ;\
+     LA(rs1, 3f-imm+adj-1  )                    ;\
+     jalr rd, imm+1(rs1)                      ;\

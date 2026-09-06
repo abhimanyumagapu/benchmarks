@@ -10,7 +10,7 @@ import yaml
 
 from stead.__main__ import bake_all
 from stead.ship import ship
-from tests.conftest import BUG_PATCH, COMMIT
+from tests.conftest import BROKEN, BUG_PATCH, COMMIT
 
 ENV = {
     "PYTHONPATH": str(Path(__file__).parent.parent),
@@ -41,7 +41,7 @@ def bench(root: Path) -> None:
     )
 
 
-def write_spec(specs, sid, test, patch=BUG_PATCH):
+def write_spec(specs, sid, test, patch=BUG_PATCH, **extra):
     specs.mkdir(parents=True, exist_ok=True)
     (specs / f"{sid}.patch").write_text(patch)
     (specs / f"{sid}.yaml").write_text(
@@ -51,6 +51,7 @@ def write_spec(specs, sid, test, patch=BUG_PATCH):
                 "test": test,
                 "bug_patch": f"{sid}.patch",
                 "gold": {"file": "rtl/alu.sv", "start": 2, "end": 2, "class": "logic"},
+                **extra,
             }
         )
     )
@@ -95,12 +96,15 @@ def test_bake_all_skips_existing_and_reports_failures(tmp_path, monkeypatch, cap
     specs = tmp_path / "specs" / "fake"
     write_spec(specs, "fake-0001", "xor_test")
     write_spec(specs, "fake-0002", "add_test")  # passes on the buggy tree
-    assert bake_all(tmp_path / "specs") == 1
+    write_spec(specs, "fake-0003", "xor_test", commit=BROKEN)  # another commit of the core: its own image
+    assert bake_all(tmp_path / "specs") == 2
     out = capsys.readouterr().out.splitlines()
-    assert out[0].startswith("fake-0001  baked") and out[1].startswith(
-        "fake-0002  FAILED  BakeError: buggy tree must FAIL"
-    )
-    assert bake_all(tmp_path / "specs") == 1
+    assert out[0].startswith("fake-0001  baked")
+    assert out[1].startswith("fake-0002  FAILED  BakeError: buggy tree must FAIL")
+    assert out[2].startswith(
+        "fake-0003  FAILED  BakeError: clean tree must PASS"
+    )  # baked on stead-fake:1111111
+    assert bake_all(tmp_path / "specs") == 2  # the baked one is skipped, the two failures retried
     assert capsys.readouterr().out.splitlines()[0].startswith("fake-0001  exists")
 
 

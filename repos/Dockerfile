@@ -1,6 +1,7 @@
 # Two stages, built with different contexts by `stead image` (stead/image.py):
 #   tools  context = {tools.tar, home.tar}          -> stead-tools
 #   core   context = {tree/, recipe/, manifest}     -> stead-<repo>:<commit>   (FROM stead-tools)
+#          the tree already has the shim applied (stead/image.py build_core)
 # The recipe is copied after the tree: a run.sh edit rebuilds the simulator, not the tree layer.
 
 FROM ubuntu:22.04 AS tools
@@ -26,6 +27,8 @@ COPY tree /work/tree
 COPY manifest /work/manifest
 COPY env.sh /work/env.sh
 COPY recipe /work/recipe
-RUN cd /work/tree && if [ -s /work/recipe/shim.patch ]; then git apply /work/recipe/shim.patch; fi
+# ccache warmed by the clean build below: a rebuild after a one-file patch recompiles that file, not the core.
+# Verilator's makefiles honor OBJCACHE; rocket-chip's cmake honors the launcher variable.
+ENV OBJCACHE=ccache CCACHE_DIR=/work/ccache CCACHE_MAXSIZE=2G CMAKE_CXX_COMPILER_LAUNCHER=ccache
 RUN /work/recipe/run.sh build /work/tree
 WORKDIR /work

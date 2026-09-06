@@ -8,14 +8,23 @@
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/../env.sh"
-export PATH=$STEAD_TOOLS/venvs/ibex/bin:$PATH
 COMP=$STEAD_TOOLS/riscv-compliance
 KNOWN="I-EBREAK-01 I-ECALL-01 I-MISALIGN_JMP-01 I-MISALIGN_LDST-01"   # trap tests the 2019 suite and ibex disagree on
 verb=$1; tree=$(cd "$2" && pwd)
+VENV=$tree/build/venv
+export PATH=$VENV/bin:$PATH
 SIM=$tree/build/lowrisc_ibex_ibex_riscv_compliance_0.1/sim-verilator/Vibex_riscv_compliance
 case $verb in
   build)
     cd "$tree" || exit 2
+    # the commit's own fusesoc and edalize, once per image (their API moved over the years). PyPI pins
+    # install normally; the lowRISC git forks older commits pin need setuptools 68 without build isolation.
+    [ -x "$VENV/bin/fusesoc" ] || {
+      python3 -m venv "$VENV" && "$VENV/bin/pip" install -q "setuptools==68.2.2" "setuptools_scm<8" wheel pyyaml mako hjson packaging
+      grep -E "^(fusesoc|edalize) *==" python-requirements.txt | tr -d " " | xargs -r "$VENV/bin/pip" install -q
+      grep -E "^git\+" python-requirements.txt | tr -d " " | xargs -r "$VENV/bin/pip" install -q --no-build-isolation
+      [ -x "$VENV/bin/fusesoc" ]
+    } > venv.log 2>&1 || { grep -iE "error" venv.log | tail -3; exit 2; }
     OPTS=$(python3 util/ibex_config.py small fusesoc_opts | tr ' ' '\n' | grep -v '^--BaseIsa=' | tr '\n' ' ')
     fusesoc --cores-root=. run --target=sim --setup --build lowrisc:ibex:ibex_riscv_compliance $OPTS \
       --verilator_options="-Wno-UNOPTFLAT" > build.log 2>&1

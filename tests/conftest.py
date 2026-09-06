@@ -6,6 +6,7 @@ import pytest
 FIX = Path(__file__).parent / "fixtures"
 FAKE = "stead-fake"
 COMMIT = "0" * 40
+BROKEN = "1" * 40  # a second commit of the fake core: its clean tree already fails
 
 # The fake DUT is fixtures/fakerepo/tree/rtl/alu.sv; these diffs are against it.
 BUG_PATCH = (
@@ -49,6 +50,7 @@ def fake_image() -> str:
         check=True,
         capture_output=True,
     )
+    subprocess.run(["docker", "tag", f"{FAKE}:broken", f"{FAKE}:{BROKEN[:7]}"], check=True)
     return FAKE
 
 

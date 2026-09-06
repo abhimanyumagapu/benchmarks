@@ -3,7 +3,7 @@ repo: ibex
 url: https://github.com/lowRISC/ibex.git
 commit: 34b0705760ef3dfa00e99637432473d2be8f22f3
 image: stead-ibex:34b0705
-image_digest: sha256:2d02bcda7321b13ff22f212ced0cf03d17370b82bb47b398de810b7482d72523
+image_digest: sha256:a8e0f756c367d5a196ddbb62beacc097106b3c7af1894d98797e26fd2f041aa5
 test: rv32i/I-XOR-01
 dump: waves/fail.fst
 validated_on: verilator-5.050

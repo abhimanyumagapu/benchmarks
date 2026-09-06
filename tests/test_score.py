@@ -3,6 +3,7 @@ named test and every test in also_fails, without touching the checker; the LLM's
 parsed, not trusted."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from stead.solve import parse_submission, solve
 from tests.conftest import FIX, FIX_PATCH, alu_patch, spec
 
 G = Gold(file="rtl/ibex_alu.sv", start=384, end=388, klass="logic")
+NO_NET = 101 if shutil.which("unshare") else 111  # unreachable with the namespace, refused without it
 
 
 def gold_dir(case_dir: Path) -> Path:
@@ -107,6 +109,8 @@ def test_solve_gives_the_agent_a_writable_tree_and_takes_the_diff_as_patch(baked
     argv = (tmp_path / "argv.log").read_text()
     assert not argv.startswith(str(baked_case))  # ran in the copy, not the case
     assert "--effort\nhigh\n" in argv and "stream-json" in argv
+    assert f"net: [Errno {NO_NET}]" in argv and "docker: open" not in argv  # no network, no docker
+    assert "sim: PASS xor_test" in argv and sub["cost"]["sims"] == 1  # it ran its fix in the core's simulator
     assert (Path(__file__).parent.parent / "skills" / "rtl-debug" / "SKILL.md").read_text().strip() in argv
     assert score_patch(baked_case, gold_dir(baked_case), sub["patch"])["fixed"] is True
 
@@ -123,13 +127,15 @@ def test_solve_runs_any_api_model_in_our_loop_with_tools_sandboxed_to_the_copy(
     assert path.name == "openai-gpt-4o+low.json"
     sub = json.loads(path.read_text())
     assert sub["lines"][0]["line"] == 2 and sub["agent"] == "openai/gpt-4o" and sub["error"] is None
-    assert sub["cost"]["usd"] > 0 and sub["cost"]["turns"] == 4 and sub["cost"]["tokens_in"] == 4000
-    assert sub["effort"] == "low" and sub["flags"] == [
-        "turn 1: https://github.com/syntacore/scr1",
-        "turn 1: urllib",
-    ]
+    assert sub["cost"]["usd"] > 0 and sub["cost"]["turns"] == 5 and sub["cost"]["tokens_in"] == 5000
+    assert sub["cost"]["sims"] == 1
+    assert sub["effort"] == "low"
+    assert sub["flags"] == ["turn 1: docker", "turn 1: https://github.com/syntacore/scr1", "turn 1: socket"]
     transcript = [json.loads(ln) for ln in path.with_suffix(".trajectory.jsonl").read_text().splitlines()]
-    assert [m["role"] for m in transcript] == ["user", *["assistant", "tool"] * 3, "assistant"]
+    assert [m["role"] for m in transcript] == ["user", *["assistant", "tool"] * 4, "assistant"]
+    assert transcript[8]["content"].startswith("PASS xor_test")  # the sim tool's verdict on the fixed tree
+    probe = transcript[2]["content"]
+    assert f"net: [Errno {NO_NET}]" in probe and "docker: open" not in probe  # no network, no docker
     assert "-  assign y = (a ^ b) ^ 32'h10; // BUG" in sub["patch"]
     assert not (baked_case / "tree").exists() and "FAIL" in (baked_case / "logs" / "fail.log").read_text()
     system = (tmp_path / "system.md").read_text()

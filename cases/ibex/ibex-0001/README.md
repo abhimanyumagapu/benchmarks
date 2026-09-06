@@ -7,8 +7,9 @@ unmodified commit. Find the cause.
 
 - `tree/` — the full buggy source tree, design docs included. The bug may be in the DUT
   (['rtl/**']) or in the testbench (['dv/**', 'examples/**', 'shared/**', 'vendor/**', 'util/**']); say which.
-- `logs/fail.log`, `logs/pass.log` — the failing run and the clean-tree run of the same test.
-- `waves/` — the dumps of both runs (`waves/fail.fst` is the fail wave).
+- `logs/fail.log` — the failing run's verdict, and next to it every other log that run wrote
+  (traces, console, bus logs). `tools/` — scripts for them; the skill says what each does.
+- `waves/` — the failing run's dump (`waves/fail.fst`).
 
 ## STEAD
 

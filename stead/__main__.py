@@ -1,6 +1,6 @@
 """stead <command> <args>
 
-    image tools <tools_dir> | image <repo> <mirror_dir>
+    image tools <tools_dir> | image <repo> <mirror_dir> [<commit>]
     push <repo|tools|--all> <registry> | pull <repo|tools|--all> <registry>
     bake <spec.yaml> | bake --all <specs_dir>
     solve <case_dir> [method] [trials] | solve --all <method> [trials]
@@ -28,7 +28,7 @@ from .bake import BakeSpec, bake
 from .check import check
 from .fail import parse_fail_line
 from .gold import Gold
-from .image import REPOS, build_core, build_tools, image_tag, pull, push, repo_cfg
+from .image import REPOS, TOOLS_TAG, build_core, build_tools, image_tag, pull, push, repo_cfg
 from .score import Submission, score_submission
 from .ship import ship
 from .solve import result_path, runner, solve
@@ -36,7 +36,7 @@ from .table import table
 from .validate import validate_stead
 
 CASES, GOLD, RESULTS = Path("cases"), Path("gold"), Path("results")
-SOLVE_JOBS = 4  # a solve holds a container for seconds and an API connection for minutes
+SOLVE_JOBS = 4  # agents at once; a solve holds a container but builds in it only under the sim tool's lock
 
 
 def load_spec(spec_path: Path) -> BakeSpec:
@@ -44,11 +44,12 @@ def load_spec(spec_path: Path) -> BakeSpec:
     repo = spec_path.parent.name
     cfg = repo_cfg(repo)
     g = d.pop("gold")
+    commit = d.pop("commit", cfg["commit"])  # a case may live at any commit of its core
     return BakeSpec(
         repo=repo,
         url=cfg["url"],
-        commit=cfg["commit"],
-        image=image_tag(repo, cfg),
+        commit=commit,
+        image=image_tag(repo, commit),
         dut_paths=cfg["dut_paths"],
         checker_paths=cfg["checker_paths"],
         validated_on=cfg["validated_on"],
@@ -121,29 +122,37 @@ def cmd_bake(spec_path: str, specs_dir: str = "") -> int:
     return 0
 
 
-def cmd_image(repo: str, src_dir: str) -> int:
+def cmd_image(repo: str, src_dir: str, commit: str = "") -> int:
     """Build the tools image from a prebuilt tools dir, or a core image from its mirror."""
     if repo == "tools":
         print(build_tools(Path(src_dir)))
         return 0
-    print(*build_core(repo, Path(src_dir)))
+    print(*build_core(repo, Path(src_dir), commit))
     return 0
 
 
-def _repos(repo: str) -> list[str]:
-    """`--all` is the tools image plus every core with a repo.yaml."""
-    return ["tools", *sorted(p.parent.name for p in REPOS.glob("*/repo.yaml"))] if repo == "--all" else [repo]
+def _images(what: str) -> list[str]:
+    """`tools`, a core at its pinned commit, or `--all`: tools, every core, every image a spec needs."""
+    if what == "tools":
+        return [TOOLS_TAG]
+    if what != "--all":
+        return [image_tag(what, repo_cfg(what)["commit"])]
+    tags = {image_tag(p.parent.name, repo_cfg(p.parent.name)["commit"]) for p in REPOS.glob("*/repo.yaml")}
+    for p in Path("specs").glob("*/*.yaml"):  # a spec may pin its own commit
+        commit = yaml.safe_load(p.read_text()).get("commit", repo_cfg(p.parent.name)["commit"])
+        tags.add(image_tag(p.parent.name, commit))
+    return [TOOLS_TAG, *sorted(tags)]
 
 
-def cmd_push(repo: str, registry: str) -> int:
-    for r in _repos(repo):
-        print(push(r, registry))
+def cmd_push(what: str, registry: str) -> int:
+    for tag in _images(what):
+        print(push(tag, registry))
     return 0
 
 
-def cmd_pull(repo: str, registry: str) -> int:
-    for r in _repos(repo):
-        print(pull(r, registry))
+def cmd_pull(what: str, registry: str) -> int:
+    for tag in _images(what):
+        print(pull(tag, registry))
     return 0
 
 
@@ -192,7 +201,7 @@ def cmd_solve(case_dir: str, method: str = "claude", trials: str = "1") -> int:
         if not result_path(RESULTS, c.name, method, t).exists()
     ]
     return _run_all(
-        [(SOLVE_JOBS, todo)],
+        [(SOLVE_JOBS, todo)],  # the sim tool serializes builds per image itself
         lambda ct: f"{ct[0]} t{ct[1]}",
         lambda ct: solve(ct[0], _gold_dir(ct[0]), method, RESULTS, ct[1]),
         lambda _ct, path: (f"solved  {path}", False),

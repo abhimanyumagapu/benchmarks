@@ -24,7 +24,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from .agents import Run, claude_code, llm, split_effort
+from .agents import ROOT, Run, claude_code, llm, sim, split_effort
 from .case import Case
 from .tree import materialize
 
@@ -32,7 +32,7 @@ RETRIES = 2  # more attempts after a crash (rate limit, container hiccup); a tim
 FENCE = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)
 OUTSIDE = re.compile(
     r"https?://\S+"
-    r"|\b(urllib|requests|socket|httpx|curl|wget|pip install|git (log|fetch|pull|clone|show|blame))\b"
+    r"|\b(urllib|requests|socket|httpx|curl|wget|docker|pip install|git (log|fetch|pull|clone|show|blame))\b"
 )
 
 
@@ -74,6 +74,13 @@ def runner(method: str) -> Callable[[Path], Run]:
     raise ValueError(f"unknown method {method!r}: claude, claude-<alias>, or <provider>/<model>")
 
 
+def add_tools(work: Path, repo: str) -> None:
+    """tools/ in a case copy: the generic scripts, then the repo's own."""
+    for tools in (ROOT / "skills" / "tools", ROOT / "skills" / repo / "tools"):
+        if tools.exists():
+            shutil.copytree(tools, work / "tools", dirs_exist_ok=True)
+
+
 def _git(tree: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(tree), *args], text=True, capture_output=True, check=True).stdout
 
@@ -82,6 +89,7 @@ def _writable_copy(case_dir: Path, gold_dir: Path, work: Path) -> Path:
     """Copy of the case with a tree/ that is a git repo, so the agent's edits come out as a diff."""
     shutil.copytree(case_dir, work, symlinks=True)
     case = Case.load(case_dir / "case.yaml")
+    add_tools(work, case.repo)
     materialize(case.image, (gold_dir / "bug.patch").read_text(), work / "tree")
     _git(work / "tree", "init", "-q")
     _git(work / "tree", "-c", "user.email=stead@bench", "-c", "user.name=stead", "add", "-A")
@@ -92,15 +100,20 @@ def _writable_copy(case_dir: Path, gold_dir: Path, work: Path) -> Path:
 def _attempt(case_dir: Path, gold_dir: Path, run: Callable[[Path], Run]) -> tuple[Run, Exception | None, str]:
     """One run on a fresh copy: (run, what crashed it, patch including files it created)."""
     tmp = Path(tempfile.mkdtemp(prefix="stead-solve-"))
+    work = tmp / case_dir.name
     try:
-        work = _writable_copy(case_dir, gold_dir, tmp / case_dir.name)
+        _writable_copy(case_dir, gold_dir, work)
+        case = Case.load(case_dir / "case.yaml")
         try:
+            sim.start(work, case.image, (gold_dir / "bug.patch").read_text())  # its simulator, bug applied
             res, error = run(work), None
         except Exception as e:  # every provider raises its own classes; a crash is a recorded miss
             res, error = Run("", "", {"usd": 0.0}), e
+        res.cost["sims"] = sim.calls(work)
         _git(work / "tree", "add", "-A")
         return res, error, _git(work / "tree", "diff", "--cached")
     finally:
+        sim.stop(work)
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -130,6 +143,7 @@ def solve(case_dir: Path, gold_dir: Path, method: str, results_root: Path, trial
         "lines": answer.get("lines", []),
         "patch": patch or None,
         "text": answer.get("text", ""),
+        "answer": res.answer,  # the final message as the agent wrote it; the transcript has the rest
         "cost": {**res.cost, "wall_s": round(time.monotonic() - t0, 1)},
     }
     path = result_path(results_root, case.id, method, trial)
